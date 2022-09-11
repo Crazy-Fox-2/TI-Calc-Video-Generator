@@ -3,7 +3,7 @@
 
 
 
-struct CompInstr {
+struct ImgInstr {
 
     lzss: bool,
     len: usize,
@@ -14,10 +14,10 @@ struct CompInstr {
     cost: u32,
     
 }
-impl CompInstr {
+impl ImgInstr {
 
-    fn new(lzss: bool, len: usize, offset: usize, stream: Option<Vec<u8>>, pos: usize) -> CompInstr {
-        CompInstr {lzss: lzss, len: len, offset: offset, stream: stream, pos: pos, bytecode: None, cost: 0}
+    fn new(lzss: bool, len: usize, offset: usize, stream: Option<Vec<u8>>, pos: usize) -> ImgInstr {
+        ImgInstr {lzss: lzss, len: len, offset: offset, stream: stream, pos: pos, bytecode: None, cost: 0}
     }
     
     fn gen_bytecode(&mut self) -> usize {
@@ -73,36 +73,36 @@ impl CompInstr {
         self.cost
     }
     
-    fn combine_to_stream(&self, other: &CompInstr, data: &Vec<u8>) -> CompInstr {
+    fn combine_to_stream(&self, other: &ImgInstr, data: &Vec<u8>) -> ImgInstr {
         // Combines this and another instruction into a single stream instruction
         let mut stream: Vec<u8> = Vec::new();
         stream.extend_from_slice(&data[self.pos..self.pos+self.len]);
         stream.extend_from_slice(&data[other.pos..other.pos+other.len]);
-        let instr = CompInstr::new(false, self.len + other.len, 0, Some(stream), self.pos);
+        let instr = ImgInstr::new(false, self.len + other.len, 0, Some(stream), self.pos);
         instr
     }
 
 }
 
 
-pub struct Frame {
+pub struct Img {
 
-    data: Vec<u8>,
-    comp: Option<Vec<CompInstr>>,
+    pub data: Vec<u8>,
+    comp: Option<Vec<ImgInstr>>,
 
 }
 
-impl Frame {
+impl Img {
 
-    pub fn new(data: Vec<u8>) -> Frame {
-        Frame {data: data, comp: None}
+    pub fn new(data: Vec<u8>) -> Img {
+        Img {data: data, comp: None}
     }
 
     
     pub fn compress(&mut self) {
         
         // Generate compressed stream
-        let mut comp:Vec<CompInstr> = Vec::new();
+        let mut comp:Vec<ImgInstr> = Vec::new();
         
 
         // Step 1: generate all lzss instructions (when we can)
@@ -131,12 +131,18 @@ impl Frame {
             }
 
             // Record instruction and move pointer foreward
-            let instr = CompInstr::new(true, largest_size, largest_off, None, ind);
-            comp.push(instr);
-            ind += largest_size;
-            if largest_size == 0 {
+            let instr = if largest_size <= 1 {
+                // Record stream instruction
+                let instr = ImgInstr::new(false, 1, 0, None, ind);
                 ind += 1;
-            }
+                instr
+            } else {
+                // Record LZSS instruction
+                let instr = ImgInstr::new(true, largest_size, largest_off, None, ind);
+                ind += largest_size;
+                instr
+            };
+            comp.push(instr);
         }
 
         // Step 2: Convert bytes not included in a valid LZSS instruction into a Stream instruction
@@ -145,8 +151,8 @@ impl Frame {
         let mut ind = 0;
         while ind < comp.len() {
             let instr = &mut comp[ind];
-            // Is this a valid LZSS command?
-            if instr.len == 0 {
+            // Is this an LZSS command?
+            if !instr.lzss {
                 if stream.len() == 0 {
                     stream_start = instr.pos;
                 }
@@ -158,7 +164,7 @@ impl Frame {
                 // Is valid!
                 // If a stream is being created, add it
                 if stream.len() > 0 {
-                    let stream_instr = CompInstr::new(false, stream.len(), 0, Some(stream), stream_start);
+                    let stream_instr = ImgInstr::new(false, stream.len(), 0, Some(stream), stream_start);
                     comp.insert(ind, stream_instr);     ind += 1;
                     stream = Vec::new();
                 }
@@ -198,10 +204,21 @@ impl Frame {
         
     }
 
-    pub fn reduce_cost(&mut self, target: u32) {
+    pub fn reduce_cost(&mut self, _target: u32) {
         // Attempt to reduce the cost until within the acceptable range
 
         // Unimplimented
+    }
+
+    pub fn output(&mut self) -> Vec<u8> {
+        // Convert our instructions into one long byte stream
+        let mut bstream: Vec<u8> = Vec::new();
+        for instr in self.comp.as_ref().unwrap().iter() {
+            for byte in instr.bytecode.as_ref().unwrap().iter() {
+                bstream.push(*byte);
+            }
+        }
+        bstream
     }
     
     

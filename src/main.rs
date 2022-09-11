@@ -4,8 +4,7 @@
 mod frame;
 
 
-use crate::frame::*;
-
+use crate::frame::img::*;
 
 
 
@@ -31,7 +30,7 @@ fn main() {
     data.push(7);
     data.push(0);
     
-    let mut frame = Frame::new(data);
+    let mut frame = Img::new(data);
     frame.compress();
     
 
