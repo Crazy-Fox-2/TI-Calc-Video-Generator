@@ -62,12 +62,12 @@ impl ImgInstr {
         // Get number of cycles this instruction will take to run
         self.cost = match self.lzss {
             true => {
-                40 + 44 + match self.offset >= 128 {
+                38 + 44 + match self.offset >= 128 {
                     true => 32, false => 20
                 } + 34 + (21 * self.len as u32) - 5 + 22
             }
             false => {
-                40 + 7 + (21 * self.len as u32) - 5 + 12
+                38 + 7 + (21 * self.len as u32) - 5 + 12
             }
         };
         self.cost

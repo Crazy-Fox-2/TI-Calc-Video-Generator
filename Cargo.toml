@@ -8,4 +8,4 @@ edition = "2021"
 [dependencies]
 args = "2.2.0"
 getopts = "0.2"
-
+image = "0.24.3"
