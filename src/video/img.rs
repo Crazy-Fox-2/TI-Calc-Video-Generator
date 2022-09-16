@@ -1,5 +1,8 @@
-
-
+use crate::video::dither::dither;
+use image::Pixel;
+use image::imageops;
+use crate::macros::*;
+use image::GenericImageView;
 
 
 
@@ -97,6 +100,49 @@ impl Img {
     pub fn new(data: Vec<u8>) -> Img {
         Img {data: data, comp: None}
     }
+    pub fn load(path: &str) -> Result<Img, String> {
+        // Read image from file
+        let mut img = passerr!(image::open(path), "Error during image frame load: {}");
+        // Resize & crop & make greyscale
+        let (width, height) = img.dimensions();
+        let ratio: f64 = width as f64 / height as f64;
+        let img = if ratio > 1.5 {
+            // Crop out left & right sides
+            let new_width: u32 = (height * 3) / 2;
+            let x = (width - new_width) / 2;
+            imageops::crop(&mut img, x, 0, new_width, height).to_image()
+        } else {
+            // Crop out the top & bottom
+            let new_height: u32 = (width * 2) / 3;
+            let y = (height - new_height) / 2;
+            imageops::crop(&mut img, 0, y, width, new_height).to_image()
+        };
+        let img = imageops::resize(&img, 96, 64, imageops::FilterType::Lanczos3);
+        let img = imageops::colorops::grayscale(&img);
+        // Dither image
+        let mut img = dither(&img, 'o');
+        // Convert to byte stream
+        let mut stream: Vec<u8> = vec![0; 12*64*2];
+        let mut iter = img.pixels_mut();
+        for y in 0..64 {
+            for x in 0..96 {
+                // Caclculate the position in the stream this pixel will get placed in
+                let col = x / 8;
+                let pos = (col * 64 + y) * 2;
+                // Shift in most & least significant bits
+                let pxl = match iter.next() {
+                    Some(pxl) => pxl,
+                    None => return Err("Number of pixels in image not as many as expected".to_string()),
+                };
+                let shade = pxl.channels()[0] / 64;
+                stream[pos] = (stream[pos] * 2) + (shade / 2);
+                stream[pos+1] = (stream[pos] * 2) + (shade % 2);
+            }
+        }
+        // Return image
+        Ok( Img {data: stream, comp: None} )
+    }
+
 
     
     pub fn compress(&mut self) {

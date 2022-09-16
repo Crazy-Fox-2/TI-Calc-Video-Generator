@@ -1,40 +1,33 @@
 #![allow(dead_code)]
 #![allow(non_snake_case)]
 
-mod frame;
+mod video;
+mod args;
+mod macros;
+
+use crate::video::video::*;
+use crate::args::*;
 
 
-use crate::frame::img::*;
 
-
-
-
+fn process() -> Result<(), String> {
+    // Get command-line arguments
+    let args = getargs()?;
+    // Load video
+    let mut vid = Video::new(&args.value_of::<String>("src").unwrap(), &args.value_of::<String>("out").unwrap(), "tempvids__/")?;
+    vid.convert();
+    Ok(())
+}
 
 
 fn main() {
     
-
-    // Test image compression
-    let mut data: Vec<u8> = Vec::new();
-    data.push(0);
-    data.push(1);
-    data.push(2);
-    data.push(3);
-    data.push(1);
-    data.push(2);
-    data.push(4);
-    data.push(2);
-    data.push(4);
-    data.push(2);
-    data.push(1);
-    data.push(7);
-    data.push(0);
+    match process() {
+        Ok(()) => {},
+        Err(err) => println!("Error: {}", err)
+    };
     
-    let mut frame = Img::new(data);
-    frame.compress();
     
-
-
 }
 
 

@@ -4,14 +4,14 @@ use getopts::Occur;
 use args::Args;
 
 
-pub fn getargs() -> Result<Args, &'static str> {
+pub fn getargs() -> Result<Args, String> {
     let mut args = Args::new("ti-audvid-convert", "Comverts a given video and transforms it into an application to be played back on a TI-83+SE or TI-84+(SE) calculator");
-
+    
     args.option("s", "src", "Source video file", "SRC", Occur::Req, None);
     args.option("o", "out", "Output application name (max 8 characters)", "OUT", Occur::Req, None);
-    args.option("f", "frameinfo", "Optional - Information about each frame for conversion", "FRM", Occur::optional, Some(String::from(" ")));
-
-    args.option("h", "help", "Flag - Print this help message");
+    
+    args.flag("h", "help", "Flag - Print this help message");
+    args.flag("v", "verbose", "Display additional messages while converting viceo");
 
     /*
     // Input options
@@ -39,7 +39,7 @@ pub fn getargs() -> Result<Args, &'static str> {
         Ok(()) => Ok(args),
         Err(err) => {
             println!("{}", err);
-            Err("Error parsing arguments")
+            Err("Error parsing arguments".to_string())
         }
     }
 }
