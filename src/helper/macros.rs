@@ -1,9 +1,22 @@
 
 
+#[macro_export]
+macro_rules! ex_variant {
+    ($variant:path, $enum:expr) => {
+        if let $variant(var) = $enum {
+            var
+        } else {
+            panic!()
+        }
+    };
+}
 
+pub(crate) use ex_variant;
+
+#[macro_export]
 macro_rules! passerr {
     ($result:expr, $message:literal) => {
-       match $result {
+        match $result {
             Ok(ok) => ok,
             Err(err) => { return(Err(format!($message, err.to_string()))); }
         }
@@ -15,6 +28,8 @@ macro_rules! passerr {
         }
     };
 }
+
+
 
 pub(crate) use passerr;
 

@@ -1,5 +1,4 @@
 use image::GrayImage;
-use image::Pixel;
 
 
 // Warning,
@@ -8,16 +7,14 @@ use image::Pixel;
 
 
 
-static SHADES: &'static [u8; 4] = &[229, 165, 68, 25];
-static SHADES_EVEN: &'static [u8; 4] = &[192, 128, 64, 0];
 
 
-fn nearest_shade(shade: u8, array: &[u8; 4]) -> u8 {
+fn nearest_shade(shade: u8, allowed: &Vec<u8>) -> u8 {
     // Find the shade closest to this one
     let mut closest_off: i16 = 9999;
     let mut closest = 0;
-    for i in 0..array.len() {
-        let s = array[i];
+    for i in 0..allowed.len() {
+        let s = allowed[i];
         let off = (shade as i16 - s as i16).abs();
         if off < closest_off {
             closest_off = off;
@@ -45,7 +42,7 @@ macro_rules! bound {
 }
 
 
-pub fn dither(source: &GrayImage, kind: char) -> GrayImage {
+pub fn dither(source: &GrayImage, kind: char, shades: Vec<u8>) -> GrayImage {
     
     let (width, height) = source.dimensions();
     let mut img = source.clone();
@@ -72,7 +69,7 @@ pub fn dither(source: &GrayImage, kind: char) -> GrayImage {
                 for x in 0..width {
                     let pxl = img.get_pixel_mut(x, y);
                     let oldval = pxl[0];
-                    let newval = nearest_shade(oldval, SHADES);
+                    let newval = nearest_shade(oldval, &shades);
                     pxl[0] = newval;
                     let error = oldval as i16 - newval as i16;
                     add_error(&mut img, error, 0.4375, x+1, y, width, height);
@@ -92,7 +89,7 @@ pub fn dither(source: &GrayImage, kind: char) -> GrayImage {
             
             fn apply_mask(x: u32, y: u32) -> f64 {
                 // Mask if taken from the article above, but with the math already applied
-                static MASK: &'static [[f64; 8]; 8] = &[[-0.5, 0.0, -3.75, 0.125, -0.46875, 0.03125, -0.34375, 0.15625],
+                static MASK: &'static [[f64; 8]; 8] = &[[-0.5, 0.0, -0.625, 0.125, -0.46875, 0.03125, -0.34375, 0.15625],
                                                         [0.25, -0.25, 0.375, -0.125, 0.28125, -0.21875, 0.40625, -0.09375],
                                                         [-0.3125, 0.1875, -0.4375, 0.0625, -0.28125, 0.21875, -0.40625, 0.09375],
                                                         [0.4375, -0.0625, 0.3125, -0.1875, 0.46875, -0.03125, 0.34375, -0.15625],
@@ -121,24 +118,22 @@ pub fn dither(source: &GrayImage, kind: char) -> GrayImage {
                 for x in 0..width {
                     let pxl = img.get_pixel_mut(x, y);
                     let mut val = pxl[0];
-                    val = bound!(val, SHADES[0], SHADES[SHADES.len()-1]);
+                    val = bound!(val, shades[0], shades[shades.len()-1]);
                     // Find which range it's in
-                    let mut ind = SHADES.len()-1;
-                    for i in 1..SHADES.len() {
-                        if val >= SHADES[i] {
+                    let mut ind = shades.len()-1;
+                    for i in 1..shades.len() {
+                        if val >= shades[i] {
                             ind = i;
                             break;
                         }
                     }
                     // Redistribute
-                    let fval = redist_range(val.try_into().unwrap(), SHADES[ind-1].try_into().unwrap(), SHADES[ind].try_into().unwrap(), (ind-1) as f64, ind as f64);
+                    let fval = redist_range(val.try_into().unwrap(), shades[ind-1].try_into().unwrap(), shades[ind].try_into().unwrap(), (ind-1) as f64, ind as f64);
                     // Pass through mask
                     let newval = bound!(fval + apply_mask(x, y), 0.0, 3.0);
-                    let newval = SHADES_EVEN[newval.floor() as usize];
                     // Change back into allowed shades
-                    val = SHADES[(newval / 4) as usize];
+                    val = shades[newval.round() as usize];
                     pxl[0] = val;
-                    //img.put_pixel(x, y, *pxl);
                 }
             }
 
