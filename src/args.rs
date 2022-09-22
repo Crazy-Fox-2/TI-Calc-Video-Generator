@@ -7,11 +7,14 @@ use args::Args;
 pub fn getargs() -> Result<Args, String> {
     let mut args = Args::new("ti-audvid-convert", "Comverts a given video and transforms it into an application to be played back on a TI-83+SE or TI-84+(SE) calculator");
     
-    args.option("s", "src", "Source video file", "SRC", Occur::Req, None);
+    args.option("i", "input", "Source video file", "INP", Occur::Req, None);
     args.option("o", "out", "Output application name (max 8 characters)", "OUT", Occur::Req, None);
-    
+    args.option("d", "duration", "How many frames (20fps) to convert from the video, omit for entire video", "DUR", Occur::Optional, Some("0".to_string()));
+    args.option("s", "start", "Which frame (20fps) to start on, default first frame", "ST", Occur::Optional, Some("0".to_string()));
+    args.option("f", "fps", "Manually supply the fps instead of checking the video", "FPS", Occur::Optional, Some("0".to_string()));
+
+    args.flag("m", "mute", "Flag - shuts me up");
     args.flag("h", "help", "Flag - Print this help message");
-    args.flag("v", "verbose", "Display additional messages while converting viceo");
 
     /*
     // Input options
