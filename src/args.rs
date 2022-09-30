@@ -1,4 +1,4 @@
-
+use crate::helper::macros::strcat;
 use std::env;
 use getopts::Occur;
 use args::Args;
@@ -54,8 +54,14 @@ pub fn getargs() -> Result<VArgs, String> {
     
     match args.parse_from_cli() {
         Ok(()) => Ok(VArgs {
-            vid_file: args.value_of::<String>("video").unwrap(),
-            vid_folder: args.value_of::<String>("folder").unwrap(),
+            vid_file: {match args.value_of::<String>("video") {
+                Ok(s) => s,
+                Err(_) => "".to_string(),
+            }},
+            vid_folder: {match args.value_of::<String>("folder") {
+                Ok(s) => strcat!(s, "/"),
+                Err(_) => "".to_string(),
+            }},
             out: args.value_of::<String>("out").unwrap(),
             name: args.value_of::<String>("name").unwrap(),
             dur: args.value_of::<usize>("duration").unwrap(),

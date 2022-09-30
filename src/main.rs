@@ -20,6 +20,7 @@ fn process() -> Result<(), String> {
     let mut vid = Video::new(&args)?;
     // Convert video
     vid.create_app()?;
+    vid.close()?;
     Ok(())
 }
 
