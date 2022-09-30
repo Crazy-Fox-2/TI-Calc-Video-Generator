@@ -81,7 +81,7 @@ impl<'a> App<'a> {
         Ok(())
     }
     
-    pub fn finish(&mut self) -> Result<(), String> {
+    pub fn finish(&mut self) -> Result<usize, String> {
         // Finish writing app pages
         while self.frame_imgs.len() > 0 {
             self.add_page(false)?;
@@ -103,7 +103,7 @@ impl<'a> App<'a> {
         // Write first page to file
         self.out.seek(SeekFrom::Start(0x00)).unwrap();
         passerr!(self.out.write(&self.first_page));
-        Ok(())
+        Ok(self.page_num)
     }
     
     fn add_page(&mut self, force_write_to_end: bool) -> Result<(), String> {
@@ -256,7 +256,7 @@ impl<'a> App<'a> {
         Ok(())
     }
     
-    pub fn print_progress(&self, num_frames: &str) {
+    pub fn print_progress(&self, total_frames: usize, total_pages: usize) {
         if !self.args.mute {
             let base = match self.page_num <= 30 {
                 true => 'X',
@@ -266,7 +266,15 @@ impl<'a> App<'a> {
                 true => 'X',
                 false => ' ',
             };
-            println!("\x1B[1AFrames:{:04}/{:04}   Pages:{:02}/??    Will fit on:  ({}) 84+  ({}) 83/84+SE", self.frame_num, num_frames, self.page_num, base, se);
+            let total_frames = match total_frames {
+                0 => "????".to_string(),
+                _ => format!("{:04}", total_frames),
+            };
+            let total_pages = match total_pages {
+                0 => "??".to_string(),
+                _ => format!("{:02}", total_pages),
+            };
+            println!("\x1B[1AFrames:{:04}/{}   Pages:{:02}/{}    Will fit on:  ({}) 84+  ({}) 83/84+SE", self.frame_num, total_frames, self.page_num, total_pages, base, se);
         }
 
     }
