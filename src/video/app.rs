@@ -81,7 +81,7 @@ impl<'a> App<'a> {
         Ok(())
     }
     
-    pub fn finish(&mut self) -> Result<usize, String> {
+    pub fn finish(&mut self) -> Result<(usize, usize, usize), String> {
         // Finish writing app pages
         while self.frame_imgs.len() > 0 {
             self.add_page(false)?;
@@ -103,7 +103,7 @@ impl<'a> App<'a> {
         // Write first page to file
         self.out.seek(SeekFrom::Start(0x00)).unwrap();
         passerr!(self.out.write(&self.first_page));
-        Ok(self.page_num)
+        Ok((self.page_num, self.total_img_size / self.frame_num, self.total_aud_size / self.frame_num))
     }
     
     fn add_page(&mut self, force_write_to_end: bool) -> Result<(), String> {

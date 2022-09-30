@@ -76,7 +76,7 @@ impl<'a> Video<'a> {
             
             // Load image & audio data
             let fpath = strcat!(self.folder, "frame", src_frame.to_string(), ".png");
-            let img = loadimg::load_interleaved(&fpath)?;
+            let img = loadimg::load_interleaved(&fpath, self.args.dither)?;
             let aud = auditer.next().unwrap();
             // Add to app
             app.add_frame(&img, &aud)?;
@@ -85,11 +85,13 @@ impl<'a> Video<'a> {
             cur_frame += 1;
         }
         // Finish app
-        let num_pages = app.finish()?;
+        let (num_pages, avg_img, avg_aud) = app.finish()?;
         app.print_progress(self.durr, num_pages);
+        print_ln_if(format!("Avg. Img Frame Size: {}", avg_img), !self.args.mute);
+        print_ln_if(format!("Avg. Aud Frame Size: {}", avg_aud), !self.args.mute);
         // Run rabbitsign
-        let bin_path = strcat!(self.out, ".bin");
-        passerr!(Command::new("rabbitsign").args(["-g", "-v", "-P", "-p", &bin_path]).output());
+        let bin_path = strcat!(self.folder, "out.bin");
+        passerr!(Command::new("rabbitsign").args(["-g", "-v", "-P", "-p", &bin_path, "-o", &strcat!(self.args.out, ".8xk")]).output());
         Ok(())
     }
     

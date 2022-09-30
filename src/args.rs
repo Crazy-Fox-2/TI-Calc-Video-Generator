@@ -13,6 +13,7 @@ pub struct VArgs {
     pub dur: usize,
     pub fps: f64,
     pub mute: bool,
+    pub dither: char,
 }
 
 
@@ -26,7 +27,8 @@ pub fn getargs() -> Result<VArgs, String> {
     args.option("d", "duration", "How many frames (20fps) to convert from the video, omit for entire video", "DUR", Occur::Optional, Some("0".to_string()));
     args.option("s", "start", "Which frame (20fps) to start on, default first frame", "ST", Occur::Optional, Some("0".to_string()));
     args.option("p", "fps", "Manually supply the fps instead of checking the video", "FPS", Occur::Optional, Some("0".to_string()));
-
+    
+    args.option("t", "dither", "The dither mode, either f for floyd-steinburg or o for ordered, deafualt=o", "DITHER", Occur::Optional, Some("o".to_string()));
     args.flag("m", "mute", "Flag - shuts me up");
     args.flag("h", "help", "Flag - Print this help message");
 
@@ -67,7 +69,8 @@ pub fn getargs() -> Result<VArgs, String> {
             dur: args.value_of::<usize>("duration").unwrap(),
             start: args.value_of::<usize>("start").unwrap(),
             fps: args.value_of::<f64>("fps").unwrap(),
-            mute: args.value_of::<bool>("mute").unwrap()
+            mute: args.value_of::<bool>("mute").unwrap(),
+            dither: args.value_of::<String>("dither").unwrap().chars().next().unwrap(),
         } ),
         Err(err) => {
             println!("{}", err);

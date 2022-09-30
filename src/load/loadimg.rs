@@ -9,7 +9,7 @@ use crate::load::dither::dither;
 use image::GenericImageView;
 
 
-pub fn load_imgs(path: &str, keepall: bool, savefile: bool)
+pub fn load_imgs(path: &str, keepall: bool, savefile: bool, dither_type: char)
     -> Result<(GrayImage, Option<(RgbaImage, RgbaImage, GrayImage)>), String> {
     
     fn save_if(img: &DynamicImage, path: &str, save: bool) -> Result<(), String> {
@@ -38,7 +38,7 @@ pub fn load_imgs(path: &str, keepall: bool, savefile: bool)
     let resize = imageops::resize(&crop, 96, 64, imageops::FilterType::Lanczos3);
     let grey = imageops::colorops::grayscale(&resize);
     // Dither image
-    let dither = dither(&grey, 'o', vec![232, 165, 68, 25]);
+    let dither = dither(&grey, dither_type, vec![232, 165, 68, 25]);
     // Save images
     let img = ImageRgba8(crop);   save_if(&img, "crop.png", savefile)?;     let crop = ex_variant!(ImageRgba8, img);    // Dancing around the borrow-checker
     let img = ImageRgba8(resize); save_if(&img, "resize.png", savefile)?;   let resize = ex_variant!(ImageRgba8, img);
@@ -55,9 +55,9 @@ pub fn load_imgs(path: &str, keepall: bool, savefile: bool)
 
 
 
-pub fn load_interleaved(path: &str) -> Result<Vec<u8>, String> {
+pub fn load_interleaved(path: &str, dither: char) -> Result<Vec<u8>, String> {
     // Get dithered image
-    let mut img = load_imgs(path, false, true)?.0;
+    let mut img = load_imgs(path, false, true, dither)?.0;
     // Convert to byte stream
     let mut stream: Vec<u8> = vec![0; 12*64*2];
     let mut iter = img.pixels_mut();
@@ -80,9 +80,9 @@ pub fn load_interleaved(path: &str) -> Result<Vec<u8>, String> {
     Ok(stream)
 }
 
-pub fn load_seperate(path: &str) -> Result<Vec<u8>, String> {
+pub fn load_seperate(path: &str, dither: char) -> Result<Vec<u8>, String> {
     // Get dithered image
-    let mut img = load_imgs(path, false, true)?.0;
+    let mut img = load_imgs(path, false, true, dither)?.0;
     // Convert to byte stream
     let mut stream: Vec<u8> = vec![0; 12*64*2];
     let mut iter = img.pixels_mut();
