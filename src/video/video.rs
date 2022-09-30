@@ -1,285 +1,117 @@
-use crate::compress;
 use crate::load::{loadimg, audiostream};
-use crate::helper::funcs::{vec_copy, find_fit, print_if, print_ln_if};
-use crate::helper::macros::passerr;
-
-use std::fs;
+use crate::helper::macros::{passerr, strcat};
+use crate::args::VArgs;
 use std::process::Command;
-use std::env;
-use std::path;
-use std::fs::File;
-use std::io::Write;
-use std::io::SeekFrom;
-use std::io::Seek;
-
-
-const PAGE_SIZE: usize = 16384;
-const DICT_END: usize = 4096;
+use crate::video::app::App;
+use std::sync::mpsc::Receiver;
+use crate::video::extract::load_vid_data;
+use crate::helper::funcs::print_ln_if;
 
 
 
-pub struct Video {
-    path: String,
-    name: String,
-    fps: f64,
-    num_frames: usize,
-    
+pub enum NumFrames {
+    Rec(Receiver<usize>),
+    Num(usize)
 }
-impl Video {
+pub struct Video<'a> {
+    pub args: &'a VArgs,
+    pub num_frames: NumFrames,
+    pub folder: String,
+    pub file: String,
+    pub name: String,
+    pub out: String,
+    pub fps: f64,
+    pub start: usize,
+    pub durr: usize,
+    pub temp: bool,
+}
+impl<'a> Video<'a> {
     
-    pub fn new(vid_path: &str, name: &str, folder_path: &str, verb: bool) -> Result<Video, String> {
-        // Attempt to extract video
-        match Self::extract_video(vid_path, folder_path, name, verb) {
-            Ok(vid) => Ok(vid),
-            Err(s) => Err(format!("Error during video extraction: {}", s))
-        }
+    pub fn new(args: &'a VArgs) -> Result<Video<'a>, String> {
+        // Setup video struct
+        let mut vid = Video { args: args, num_frames: NumFrames::Num(0), folder: args.vid_folder.clone(), file: args.vid_file.clone(), name: args.name.clone(), out: args.out.clone(), fps: args.fps, durr: args.dur, start: args.start, temp: false };
+        load_vid_data(&mut vid, args)?;
+        Ok(vid)
     }
 
-    pub fn convert(&mut self, frame_start: usize, max_frames: usize, verb: bool) -> Result<(), String> {
-        let mut total_img_size = 0;
-        let mut total_aud_size = 0;
-        // Create new app
-        // Load the base app
-        let mut page = passerr!(file_from_wd_or_exe("appbase.bin"));
-        let mut data_start = page.len();
-        assert!(data_start < DICT_END - 256, "Base app does not leave enough room for the dictionary");
-        page.resize(PAGE_SIZE, 255);
-        let mut framenum = frame_start;
-        let mut pagenum = 0;
-        // Setup audio iterator
-        let mut apath = self.path.clone();
-        apath.push_str("audio.wav");
-        let mut auditer = audiostream::AudIter::new(&apath)?;
-        // Skip audio frames
-        for _i in 0..frame_start {
+    pub fn create_app(&mut self) -> Result<(), String> {
+        print_ln_if("".to_string(), !self.args.mute);
+        let mut app = App::new(self.args)?;
+        let mut cur_frame = 0;
+        let mut auditer = audiostream::AudIter::new(&strcat!(self.folder, "audio.wav"))?;
+        let mut num_frames_str: String = if self.durr == 0 {
+            match &self.num_frames {
+                NumFrames::Rec(_rec) => {"????".to_string()},
+                NumFrames::Num(num) => {format!("{:04}", num)}
+            }
+        } else {
+            format!("{:04}", self.durr)
+        };
+        
+        // Skip audio before start of encoded video
+        for _i in 0..self.start {
             auditer.next();
         }
-        // Setup output file
-        let mut outpath = self.path.clone();
-        outpath.push_str("out.bin");
-        let mut out = passerr!(File::options().write(true).create(true).open(&outpath), "Error opening output file: {}");
-        out.seek(SeekFrom::Start(0)).unwrap();
-        // Setup list of compressed frames
-        let mut est_size = data_start;
-        let mut frame_sizes: Vec<usize> = Vec::new();
-        let mut frame_imgs: Vec<Vec<u8>> = Vec::new();
-        let mut frame_auds: Vec<Vec<u8>> = Vec::new();
         loop {
-            // Get the frame number from the origional video
-            let orig_frame = ((framenum as f64 * (self.fps / 20.0)) as usize) + 1;
-            if orig_frame > self.num_frames {
-                break;
-            }
-            if max_frames != 0 && (framenum - frame_start) > max_frames {
-                break;
-            }
-            print_ln_if(format!("Encoding frame {}", framenum), verb);
-            // Encode & Compress image & audio
-            let mut fpath = self.path.clone();
-            fpath.push_str("frame");    fpath.push_str(&orig_frame.to_string());  fpath.push_str(".png");
-            let img = loadimg::load(&fpath)?;
-            let img_data = compress::rlelzss::compress(img);
-            let aud = auditer.next().unwrap();
-            let aud_data = compress::diff::compress(aud);
-            // Add frame
-            let frame_size = img_data.len() + aud_data.len();
-            total_img_size += img_data.len();
-            total_aud_size += aud_data.len();
-            est_size += frame_size + 4;
-            frame_sizes.push(img_data.len());   // Push img first
-            frame_sizes.push(aud_data.len());
-            frame_imgs.push(img_data);
-            frame_auds.push(aud_data);
-            if est_size >= PAGE_SIZE {
-                write_page(&mut out, &mut page, &mut frame_sizes, &mut frame_imgs, &mut frame_auds, &mut pagenum, &mut data_start)?;
-                est_size = 0;
-            }
-            framenum += 1;
-        }
-        // Write data for last page & write it to file
-        write_page(&mut out, &mut page, &mut frame_sizes, &mut frame_imgs, &mut frame_auds, &mut pagenum, &mut data_start)?;
-        if frame_sizes.len() > 0 {
-            passerr!(out.write(&page));
-            write_page(&mut out, &mut page, &mut frame_sizes, &mut frame_imgs, &mut frame_auds, &mut pagenum, &mut data_start)?;
-        }
-        page[DICT_END-2] = 255;
-        passerr!(out.write(&page));
-        // Write app name & number of pages
-        out.seek(SeekFrom::Start(0x0C)).unwrap();
-        for c in self.name.chars() {
-            if c.is_alphanumeric() {
-                passerr!(out.write(&[c as u8]));
-            } else {
-                passerr!(out.write(&[0x20]));
-            }
-        }
-        out.seek(SeekFrom::Start(0x16)).unwrap();
-        passerr!(out.write(&[pagenum+1 as u8]));
-        
-        println!("Average image size: {}", (total_img_size / framenum));
-        println!("Average audio size: {}", (total_aud_size / framenum));
-        
-        fn write_page(out: &mut File, page: &mut Vec<u8>, sizes: &mut Vec<usize>, imgs: &mut Vec<Vec<u8>>, auds: &mut Vec<Vec<u8>>, pagenum: &mut u8, data_start: &mut usize) -> Result<(), String> {
-            // Page number & begin/end flag
-            page[DICT_END-1] = *pagenum;
-            page[DICT_END-2] = match *pagenum {
-                0 => 1,
-                _ => 0
+            // Get frame number to encode
+            let src_frame = (((cur_frame + self.start) as f64 / 20.0) * self.fps) as usize + 1;
+            // Check on ffmpeg thread
+            match &self.num_frames {
+                NumFrames::Rec(rec) => {
+                    // Wait for next frame to exist (currently outputing from ffmpeg) or thread has
+                    // finished
+                    loop {
+                        // Check if thread finished
+                        match rec.try_recv() {
+                            Ok(num) => {
+                                // Thread has finished and given us the total number of frames
+                                self.num_frames = NumFrames::Num(num);
+                                // Set durration
+                                let max_durr = ((num as f64 / self.fps) * 20.0) as usize - self.start;
+                                if self.durr == 0 || self.durr > max_durr {
+                                    self.durr = max_durr;
+                                }
+                                num_frames_str = format!("{:04}", self.durr);
+                                break;
+                            },
+                            Err(_) => {}
+                        }
+                        // Check if frame after current frame exists
+                        let frame_name = strcat!(self.folder, "frame", (src_frame+1).to_string(), ".png");
+                        if std::path::Path::new(&frame_name).exists() {
+                            break;
+                        }
+                        // Cannot continue yet, sleep for a little bit
+                        std::thread::sleep(std::time::Duration::from_millis(400));
+                    }
+                },
+                NumFrames::Num(_num) => {},
             };
-            // Try to fit in as many frames as we can: first try all frames, then all frames but
-            // the last, etc.
-            // Frames that did not fit will be put in the new vectors
-            let mut sizes_next: Vec<usize> = Vec::new();
-            let mut imgs_next: Vec<Vec<u8>> = Vec::new();
-            let mut auds_next: Vec<Vec<u8>> = Vec::new();
-            loop {
-                let dict_size = imgs.len() * 4 + 4;
-                let dict_start = DICT_END - dict_size;
-                // Get the most efficient fit into the section before the dictionary
-                let sec1_len = dict_start - *data_start;
-                let (_, marked, _) = find_fit(&sizes, sec1_len);
-                // Get how long the section after the dictionary will be
-                let mut sec2_len = 0;
-                for i in 0..sizes.len() {
-                    if marked[i] == false {
-                        sec2_len += sizes[i];
-                    }
-                }
-                if sec2_len >= PAGE_SIZE - DICT_END {
-                    // Will not fit, remove last frame and try again
-                    sizes_next.insert(0, sizes.pop().unwrap());
-                    sizes_next.insert(0, sizes.pop().unwrap());
-                    imgs_next.insert(0, imgs.pop().unwrap());
-                    auds_next.insert(0, auds.pop().unwrap());
-                } else {
-                    // Will fit, write data & dictionary to page
-                    // Write dict start position
-                    page[DICT_END-3] = (dict_start / 256) as u8;
-                    page[DICT_END-4] = (dict_start % 256) as u8;
-                    // Write frames before dictionary
-                    let mut data_pos = *data_start;
-                    for i in 0..sizes.len() {
-                        if marked[i] == true {
-                            // Get position in dictionary
-                            let dict_pos = dict_start + (2 * i);
-                            // Get data
-                            let data = match i % 2 {
-                                0 => &imgs[i / 2],
-                                _ => &auds[i / 2]
-                            };
-                            // Copy data into page
-                            vec_copy(page, data_pos, data, 0, data.len());
-                            // Write data position
-                            page[dict_pos] = (data_pos % 256) as u8;
-                            page[dict_pos+1] = (data_pos / 256) as u8;
-                            data_pos += data.len();
-                        }
-                    }
-                    // Write frames after dictionary
-                    let mut data_pos = DICT_END;
-                    for i in 0..sizes.len() {
-                        if marked[i] == false {
-                            // Get position in dictionary
-                            let dict_pos = dict_start + (2 * i);
-                            // Get data
-                            let data = match i % 2 {
-                                0 => &imgs[i / 2],
-                                _ => &auds[i / 2]
-                            };
-                            // Copy data into page
-                            vec_copy(page, data_pos, data, 0, data.len());
-                            // Write data position
-                            page[dict_pos] = (data_pos % 256) as u8;
-                            page[dict_pos+1] = (data_pos / 256) as u8;
-                            data_pos += data.len();
-                        }
-                    }
-                    break;
-                }
-                    
+            // Check if done with encoding frames
+            if self.durr != 0 && cur_frame >= self.durr {
+                break;
             }
-
-            // Write page to output
-            passerr!(out.write(page));
             
-            page[0] = 0xBA;
-            *data_start = 1;
-            *pagenum += 1;
-            *sizes = sizes_next;
-            *imgs = imgs_next;
-            *auds = auds_next;
-
-            Ok(())
-            
+            // Load image & audio data
+            let fpath = strcat!(self.folder, "frame", src_frame.to_string(), ".png");
+            let img = loadimg::load_interleaved(&fpath)?;
+            let aud = auditer.next().unwrap();
+            // Add to app
+            app.add_frame(&img, &aud)?;
+            // Print progress
+            app.print_progress(&num_frames_str);
+            cur_frame += 1;
         }
-        
+        // Finish app
+        app.finish()?;
+        app.print_progress(&num_frames_str);
+        // Run rabbitsign
+        let bin_path = strcat!(self.out, ".bin");
+        passerr!(Command::new("rabbitsign").args(["-g", "-v", "-P", "-p", &bin_path]).output());
         Ok(())
-        
-        
     }
-
     
     
-    fn extract_video(vid_path: &str, folder_path: &str, name: &str, verb: bool) -> Result<Video, String> {
-        // Check if video folder exists
-        if fs::metadata(folder_path).is_ok() {
-            // Remove folder
-            passerr!(fs::remove_dir_all(folder_path));
-
-        }
-        // Create new folder
-        passerr!(fs::create_dir(folder_path));
-        
-        // Extract video frames to this new folder using ffmpeg
-        // In theory it would be better to use gstreamer or ffmpeg rust libraries, but those make
-        // my head spin and this is easier. Sorry.
-        print_ln_if("Extracting video frames, this may take some time.".to_string(), verb);
-        let mut fname_arg = folder_path.to_string();    fname_arg.push_str("frame%1d.png");
-        match Command::new("ffmpeg").args(["-r", "1", "-i", vid_path, "-r", "1", &fname_arg, "-y"]).output() {
-            Ok(_) => {},
-            Err(e) => { 
-                return Err(format!("Error extracting video frames: {}", e));
-            }
-        };
-        // Get number of files in the folder, this is the number of frames
-        let paths = passerr!(fs::read_dir(folder_path));
-        let num_frames = paths.count();
-        if num_frames == 0 {
-            return Err("No video frames extracted, is ffmpeg istalled?".to_string());
-        }
-        // Extract audio
-        print_ln_if("Extracting audio stream".to_string(), verb);
-        let mut aname_arg = folder_path.to_string();    aname_arg.push_str("audio.wav");
-        match Command::new("ffmpeg").args(["-i", vid_path, "-f", "wav", "-ar", "10920", "-ac", "1", "-vn", &aname_arg]).output() {
-            Ok(_) => {},
-            Err(e) => {
-                return Err(format!("Error extracting audio: {}", e));
-            }
-        }
-        // Get framerate
-        print_if("Extracting frame rate: ".to_string(), verb);
-        let fps: f64 = match Command::new("ffprobe").args(["-v", "0", "-of", "csv=p=0", "-select_streams", "V:0", "-show_entries", "stream=avg_frame_rate", vid_path]).output() {
-            Ok(out) => {
-                // Figure out framerate from output
-                let s = match std::str::from_utf8(&out.stdout) {
-                    Ok(v) => v,
-                    Err(e) => return Err(format!("Invalid UTF=8 sequence when extracting framerate: {}", e))
-                };
-                let mut split = s.split(&['/', '\n']);
-                let num: i32 = split.next().unwrap().parse().unwrap();
-                let den: i32 = split.next().unwrap().parse().unwrap();
-                let fps: f64 = num as f64 / den as f64;
-                fps
-            },
-            Err(e) => {
-                return Err(format!("Error extracting framerate: {}", e));
-            }
-        };
-        print_ln_if(fps.to_string(), verb);
-        
-        // Setup struct
-        Ok( Video { path: folder_path.to_string(), name: name.to_string(), fps: fps, num_frames: num_frames } )
-    }
 
 
 }
@@ -288,30 +120,3 @@ impl Video {
 
 
 
-fn file_from_wd_or_exe(name: &str) -> Result<Vec<u8>, String> {
-    // Searches for the given file in the path of the executable then in the working directory
-    // First search in folder with executable
-    match env::current_exe() {
-        Ok(mut exe_path) => {
-            exe_path.pop();
-            match file_from_dir(exe_path, name) {
-                Ok(data) => return Ok(data),
-                Err(_) => {},
-            }
-        },
-        Err(_) => {},
-    };
-    // Second search in working directory
-    match env::current_dir() {
-        Ok(path) => {
-            Ok(passerr!(file_from_dir(path, name), "Error reading base app file: {}, is it in the executable folder or in the working directory?"))
-        },
-        Err(_err) => {
-            Err("Error finding both executable path and working directory".to_string())
-        }
-    }
-}
-pub fn file_from_dir(mut path: path::PathBuf, name: &str) -> Result<Vec<u8>, String> {
-    path.push(name);
-    Ok(passerr!(fs::read(path)))
-}

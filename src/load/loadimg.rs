@@ -55,7 +55,7 @@ pub fn load_imgs(path: &str, keepall: bool, savefile: bool)
 
 
 
-pub fn load(path: &str) -> Result<Vec<u8>, String> {
+pub fn load_interleaved(path: &str) -> Result<Vec<u8>, String> {
     // Get dithered image
     let mut img = load_imgs(path, false, true)?.0;
     // Convert to byte stream
@@ -74,6 +74,31 @@ pub fn load(path: &str) -> Result<Vec<u8>, String> {
             let shade = 3 - (pxl.channels()[0] / 64);
             stream[pos] = (stream[pos] * 2) + (shade / 2);
             stream[pos+1] = (stream[pos+1] * 2) + (shade % 2);
+        }
+    }
+    // Return image
+    Ok(stream)
+}
+
+pub fn load_seperate(path: &str) -> Result<Vec<u8>, String> {
+    // Get dithered image
+    let mut img = load_imgs(path, false, true)?.0;
+    // Convert to byte stream
+    let mut stream: Vec<u8> = vec![0; 12*64*2];
+    let mut iter = img.pixels_mut();
+    for y in 0..64 {
+        for x in 0..96 {
+            // Caclculate the position in the stream this pixel will get placed in
+            let col = x / 8;
+            let pos = col * 64 + y;
+            // Shift in most & least significant bits
+            let pxl = match iter.next() {
+                Some(pxl) => pxl,
+                None => return Err("Number of pixels in image not as many as expected".to_string()),
+            };
+            let shade = 3 - (pxl.channels()[0] / 64);
+            stream[pos] = (stream[pos] * 2) + (shade / 2);
+            stream[pos+768] = (stream[pos+768] * 2) + (shade % 2);
         }
     }
     // Return image

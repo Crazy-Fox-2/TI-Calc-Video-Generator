@@ -1,3 +1,7 @@
+use std::path;
+use std::env;
+use crate::helper::macros::passerr;
+use std::fs;
 
 
 pub fn vec_copy<T: Copy>(to: &mut Vec<T>, tp: usize, from: &Vec<T>, fp: usize, len: usize) {
@@ -16,6 +20,35 @@ pub fn print_if(print: String, verbose: bool) {
     if verbose {
         print!("{}", print);
     }
+}
+
+
+pub fn file_from_wd_or_exe(name: &str) -> Result<Vec<u8>, String> {
+    // Searches for the given file in the path of the executable then in the working directory
+    // First search in folder with executable
+    match env::current_exe() {
+        Ok(mut exe_path) => {
+            exe_path.pop();
+            match file_from_dir(exe_path, name) {
+                Ok(data) => return Ok(data),
+                Err(_) => {},
+            }
+        },
+        Err(_) => {},
+    };
+    // Second search in working directory
+    match env::current_dir() {
+        Ok(path) => {
+            Ok(passerr!(file_from_dir(path, name), "Error reading base app file: {}, is it in the executable folder or in the working directory?"))
+        },
+        Err(_err) => {
+            Err("Error finding both executable path and working directory".to_string())
+        }
+    }
+}
+pub fn file_from_dir(mut path: path::PathBuf, name: &str) -> Result<Vec<u8>, String> {
+    path.push(name);
+    Ok(passerr!(fs::read(path)))
 }
 
 
