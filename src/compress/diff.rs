@@ -17,7 +17,7 @@ fn putoffsets(comp: &mut Vec<u8>, offsets: &mut Vec<i8>) {
 }
 
 
-pub fn compress(data: Vec<u8>) -> Vec<u8> {
+pub fn compress(data: &[u8]) -> Vec<u8> {
 
     // Compress audio samples
     let mut prev_samp: u8 = 196;    // Guarenteed out of range

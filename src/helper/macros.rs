@@ -10,8 +10,8 @@ macro_rules! ex_variant {
         }
     };
 }
-
 pub(crate) use ex_variant;
+
 
 #[macro_export]
 macro_rules! passerr {
@@ -28,10 +28,17 @@ macro_rules! passerr {
         }
     };
 }
-
-
-
 pub(crate) use passerr;
 
 
-
+#[macro_export]
+macro_rules! strcat {
+    ($($s:expr),*) => {{
+        let mut cat: String = String::new();
+        $(
+            cat.push_str(&$s);
+        )*
+        cat
+    }};
+}
+pub(crate) use strcat;
