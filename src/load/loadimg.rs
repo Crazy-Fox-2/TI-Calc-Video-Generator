@@ -40,10 +40,10 @@ pub fn load_imgs(path: &str, keepall: bool, savefile: bool, dither_type: char)
     // Dither image
     let dither = dither(&grey, dither_type, vec![232, 165, 68, 25]);
     // Save images
-    let img = ImageRgba8(crop);   save_if(&img, "crop.png", savefile)?;     let crop = ex_variant!(ImageRgba8, img);    // Dancing around the borrow-checker
-    let img = ImageRgba8(resize); save_if(&img, "resize.png", savefile)?;   let resize = ex_variant!(ImageRgba8, img);
-    let img = ImageLuma8(grey);   save_if(&img, "grey.png", savefile)?;     let grey = ex_variant!(ImageLuma8, img);
-    let img = ImageLuma8(dither); save_if(&img, "dither.png", savefile)?;   let dither = ex_variant!(ImageLuma8, img);
+    let img = ImageRgba8(crop);   save_if(&img, "dbg/crop.png", savefile)?;     let crop = ex_variant!(ImageRgba8, img);    // Dancing around the borrow-checker
+    let img = ImageRgba8(resize); save_if(&img, "dbg/resize.png", savefile)?;   let resize = ex_variant!(ImageRgba8, img);
+    let img = ImageLuma8(grey);   save_if(&img, "dbg/grey.png", savefile)?;     let grey = ex_variant!(ImageLuma8, img);
+    let img = ImageLuma8(dither); save_if(&img, "dbg/dither.png", savefile)?;   let dither = ex_variant!(ImageLuma8, img);
     
     if keepall {
         Ok((dither, Some((crop, resize, grey))))

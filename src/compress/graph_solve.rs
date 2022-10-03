@@ -20,7 +20,7 @@ struct Node {
 }
 impl Node {
     fn new() -> Node {
-        Node {cost: -1, from: -1, rel_pos: 0, prev_ind: -1, instr_type: 0, id: 0, len: 0}
+        Node {cost: -1, from: -2, rel_pos: 0, prev_ind: -1, instr_type: 0, id: 0, len: 0}
     }
 }
     
@@ -73,6 +73,10 @@ impl GraphSolve<'_> {
         for pos in 1..(len+1) {
             
             let mut row: Vec<Node> = Vec::new();
+            
+            if pos == 10 {
+                print!("{}", row.len());
+            }
             
             // Continue instructions from last frame
             for (ind, node) in graph[pos-1].iter().enumerate() {
@@ -171,7 +175,7 @@ impl GraphSolve<'_> {
                 list.push(gen(self.data, pos, cur_node.id, len));
                 len = 0;
             }
-            if cur_node.from != -1 {
+            if cur_node.from >= 0 {
                 // Move to previous node unless this is the end of the graph
                 cur_node = &graph[pos][cur_node.from as usize];
             }
@@ -190,16 +194,5 @@ impl GraphSolve<'_> {
     
     
 }
-
-
-
-
-
-
-
-
-
-
-
 
 

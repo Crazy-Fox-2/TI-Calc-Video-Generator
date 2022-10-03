@@ -36,7 +36,7 @@ impl<'a> Video<'a> {
 
     pub fn create_app(&mut self) -> Result<(), String> {
         print_ln_if("".to_string(), !self.args.mute);
-        let mut app = App::new(self.args)?;
+        let mut app = App::new(self.args, &self)?;
         let mut cur_frame = 0;
         let mut auditer = audiostream::AudIter::new(&strcat!(self.folder, "audio.wav"))?;
         
@@ -48,27 +48,22 @@ impl<'a> Video<'a> {
             // Get frame number to encode
             let src_frame = (((cur_frame + self.start) as f64 / 20.0) * self.fps) as usize + 1;
             // Check on ffmpeg thread
-            match &self.num_frames {
-                NumFrames::Rec(_rec) => {
-                    // Wait for next frame to exist (currently outputing from ffmpeg) or thread has
-                    // finished
-                    loop {
-                        // Check if thread finished
-                        if self.try_recv() {
-                            break;
-                        }
-                        
-                        // Check if frame after current frame exists
-                        let frame_name = strcat!(self.folder, "frame", (src_frame+1).to_string(), ".png");
-                        if std::path::Path::new(&frame_name).exists() {
-                            break;
-                        }
-                        // Cannot continue yet, sleep for a little bit
-                        std::thread::sleep(std::time::Duration::from_millis(400));
-                    }
-                },
-                NumFrames::Num(_num) => {},
-            };
+            // Wait for next frame to exist (currently outputing from ffmpeg) or thread has
+            // finished
+            loop {
+                // Check if thread finished
+                if self.try_recv() {
+                    break;
+                }
+                
+                // Check if frame after current frame exists
+                let frame_name = strcat!(self.folder, "frame", (src_frame+1).to_string(), ".png");
+                if std::path::Path::new(&frame_name).exists() {
+                    break;
+                }
+                // Cannot continue yet, sleep for a little bit
+                std::thread::sleep(std::time::Duration::from_millis(400));
+            }
             // Check if done with encoding frames
             if self.durr != 0 && cur_frame >= self.durr {
                 break;
@@ -103,16 +98,22 @@ impl<'a> Video<'a> {
                         // Thread has finished and given us the total number of frames
                         self.num_frames = NumFrames::Num(num);
                         // Set durration
-                        let max_durr = ((num as f64 / self.fps) * 20.0) as usize - self.start;
-                        if self.durr == 0 || self.durr > max_durr {
-                            self.durr = max_durr;
-                        }
+                        self.set_durr(num);
                         true
                     },
                     Err(_) => false
                 }
             },
-            NumFrames::Num(_num) => {true},
+            NumFrames::Num(num) => {
+                self.set_durr(*num);    // Why??????
+                true
+            },
+        }
+    }
+    fn set_durr(&mut self, max: usize) {
+        let max_durr = (((max-1) as f64 / self.fps) * 20.0) as usize - self.start;
+        if self.durr == 0 || self.durr > max_durr {
+            self.durr = max_durr;
         }
     }
     
