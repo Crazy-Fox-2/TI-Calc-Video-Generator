@@ -8,9 +8,28 @@ pub fn compress(nt: usize, d: &[u8], ins: &[&dyn Fn(&[u8], usize) -> Vec<(usize,
         gs.gen_bytecode(gs.make_graph())
     }
 */
+/*
 
+fn c_test(data: &[u8]) {
+    println!("{:?}", graph_solve::GraphSolve::compress(5, &data, &[&stream_get_instrs, &lzss_get_instrs, &alt_flip_get_instrs, &alt_white_get_instrs, &alt_black_get_instrs],
+                                    &[&stream_get_step_cost, &lzss_get_step_cost, &alt_flip_get_step_cost, &alt_white_get_step_cost, &alt_black_get_step_cost],
+                                    &[&stream_get_entry_cost, &lzss_get_entry_cost, &alt_flip_get_entry_cost, &alt_white_get_entry_cost, &alt_black_get_entry_cost],
+                                    &[&stream_get_cont_cost, &lzss_get_cont_cost, &alt_flip_get_cont_cost, &alt_white_get_cont_cost, &alt_black_get_cont_cost],
+                                    &[&stream_gen_bytecode, &lzss_gen_bytecode, &alt_flip_gen_bytecode, &alt_white_gen_bytecode, &alt_black_gen_bytecode] ) );
+}
+*/
 
 pub fn compress(data: &[u8]) -> Vec<u8> {
+    
+    /*
+    // Test compression
+    let d0 = vec![0, 1, 2, 3, 4, 5];
+    let d1 = vec![0, 5, 0, 5];
+    let d2 = vec![0, 5, 0, 5, 0, 5, 0, 5, 0, 5];
+    c_test(&d0);
+    c_test(&d1);
+    c_test(&d2);
+    */
     
     // Compress
     let mut comp = graph_solve::GraphSolve::compress(5, &data, &[&stream_get_instrs, &lzss_get_instrs, &alt_flip_get_instrs, &alt_white_get_instrs, &alt_black_get_instrs],
@@ -39,12 +58,12 @@ fn lzss_get_instrs(data: &[u8], pos: usize) -> Vec<(usize, usize)> {
             if data[to] == data[from] {
                 len += 1;
             } else {
-                if len >= 2 {
-                    let offset = pos - from_start;  // offset will be the unique identifier
-                    list.push((len, offset));
-                }
                 break;
             }
+        }
+        if len >= 2 {
+            let offset = pos - from_start;  // offset will be the unique identifier
+            list.push((len, offset));
         }
     }
     list
@@ -73,8 +92,8 @@ fn lzss_gen_bytecode(_data: &[u8], _pos: usize, off: usize, mut len: usize) -> V
     let num = num::Integer::div_ceil(&len, &LZSS_MAX_LEN);
     let max_put_len = num::Integer::div_ceil(&len, &num);
     for _i in 0..num {
-        let put_len = cmp::min(len, max_put_len) - 1;
-        bytecode.push((put_len as u8) << 3);
+        let put_len = cmp::min(len, max_put_len);
+        bytecode.push(((put_len - 1) as u8) << 3);
         // Offset stored in 1 or 2 bytes depending on size
         if off >= 128 {
             bytecode.push(((off & 0x7F00) >> 7) as u8 + 1);
@@ -115,8 +134,8 @@ fn stream_gen_bytecode(data: &[u8], mut pos: usize, _id: usize, mut len: usize) 
     let num = num::Integer::div_ceil(&len, &STREAM_MAX_LEN);
     let max_put_len = num::Integer::div_ceil(&len, &num);
     for _i in 0..num {
-        let put_len = cmp::min(len, max_put_len) - 1;
-        bytecode.push(((put_len as u8) << 2) + 0x02);
+        let put_len = cmp::min(len, max_put_len);
+        bytecode.push((((put_len - 1) as u8) << 2) + 0x02);
         for byte in &data[pos..pos+put_len] {
             bytecode.push(*byte);
             pos += 1;
@@ -162,12 +181,12 @@ fn alt_flip_gen_bytecode(data: &[u8], mut pos: usize, id: usize, mut len: usize)
     let mut bytecode: Vec<u8> = Vec::new();
     // Figure out how many instructions we'll need to use and the lengths of each one
     let num = num::Integer::div_ceil(&len, &ALT_FLIP_MAX_LEN);
-    let max_put_len = num::Integer::div_ceil(&len, &num);
+    let max_put_len = 32;
     for _i in 0..num {
-        let put_len = cmp::min(len, max_put_len) - 1;
-        bytecode.push(((put_len as u8) << 3) + 0x04);
+        let put_len = cmp::min(len, max_put_len);
+        bytecode.push((((put_len - 1) as u8) << 3) + 0x04);
         for byte in &data[pos..pos+put_len] {
-            if pos % 2 == id {
+            if (pos % 2) == id {
                 bytecode.push(*byte);
             }
             pos += 1;
@@ -214,8 +233,8 @@ fn alt_white_gen_bytecode(data: &[u8], mut pos: usize, id: usize, mut len: usize
     let num = num::Integer::div_ceil(&len, &ALT_WHITE_MAX_LEN);
     let max_put_len = num::Integer::div_ceil(&len, &num);
     for _i in 0..num {
-        let put_len = cmp::min(max_put_len, len) - 1;
-        bytecode.push(((put_len as u8) << 3) + 0x01 + ((id as u8) << 2));
+        let put_len = cmp::min(max_put_len, len);
+        bytecode.push((((put_len - 1) as u8) << 3) + 0x01 + ((((id+pos)%2) as u8) << 2));
         for byte in &data[pos..pos+put_len] {
             if pos % 2 == id {
                 bytecode.push(*byte);
@@ -264,8 +283,8 @@ fn alt_black_gen_bytecode(data: &[u8], mut pos: usize, id: usize, mut len: usize
     let num = num::Integer::div_ceil(&len, &ALT_BLACK_MAX_LEN);
     let max_put_len = num::Integer::div_ceil(&len, &num);
     for _i in 0..num {
-        let put_len = cmp::min(len, max_put_len) - 1;
-        bytecode.push(((put_len as u8) << 3) + 0x03 + ((id as u8) << 2));
+        let put_len = cmp::min(len, max_put_len);
+        bytecode.push((((put_len - 1) as u8) << 3) + 0x03 + ((((id+pos)%2) as u8) << 2));
         for byte in &data[pos..pos+put_len] {
             if pos % 2 == id {
                 bytecode.push(*byte);

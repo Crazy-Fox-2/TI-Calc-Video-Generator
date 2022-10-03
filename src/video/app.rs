@@ -1,3 +1,4 @@
+use crate::Video;
 use crate::helper::funcs::*;
 use crate::compress;
 use std::io::{Seek, SeekFrom};
@@ -29,13 +30,13 @@ pub struct App<'a> {
 }
 impl<'a> App<'a> {
     
-    pub fn new(args: &'a VArgs) -> Result<App<'a>, String> {
+    pub fn new(args: &'a VArgs, vid: &Video) -> Result<App<'a>, String> {
         // Load first page
         let mut first_page = passerr!(file_from_wd_or_exe("appbase.bin"));
         let first_page_start = first_page.len();
         first_page.resize(PAGE_SIZE, 255);
         // Setup output file
-        let outpath = strcat!(args.vid_folder, "out.bin");
+        let outpath = strcat!(vid.folder, "out.bin");
         let mut out = passerr!(File::options().write(true).create(true).open(&outpath), "Error opening output file: {}");
         // Skip to second page, will write first page last
         passerr!(out.set_len(PAGE_SIZE as u64));
@@ -63,6 +64,11 @@ impl<'a> App<'a> {
         // Compress image & audio
         let img_comp = compress::lzss_alt::compress(img);
         let aud_comp = compress::diff::compress(aud);
+        // Output to debug file
+        let mut file = passerr!(File::create(strcat!("dbg/img_", self.frame_num.to_string(), ".bin")));     passerr!(file.write_all(img));
+        let mut file = passerr!(File::create(strcat!("dbg/imgc_", self.frame_num.to_string(), ".bin")));    passerr!(file.write_all(&img_comp));
+        let mut file = passerr!(File::create(strcat!("dbg/aud_", self.frame_num.to_string(), ".bin")));     passerr!(file.write_all(aud));
+        let mut file = passerr!(File::create(strcat!("dbg/audc_", self.frame_num.to_string(), ".bin")));    passerr!(file.write_all(&aud_comp));
         // Add frame to list
         let frame_size = img_comp.len() + aud_comp.len();
         self.total_img_size += img_comp.len();
@@ -134,17 +140,16 @@ impl<'a> App<'a> {
                     continue;
                 }
                 // Write dictionary header information
-                self.page[0] = 0x02;
+                self.page[0] = 0x50;
                 self.page[1] = self.page_num as u8;
-                self.page[2] = (dict_size - 2) as u8;
-                self.page[3] = ((dict_size - 2) / 256) as u8;
+                self.page[2] = (dict_size - 4) as u8;
+                self.page[3] = ((dict_size - 4) / 256 + 0x80) as u8;
                 // Set page size, extend to end of page border if not last frame
                 if force_write_to_end || next_frame_imgs.len() > 0 {
                     self.page.resize(PAGE_SIZE, 255);
                 } else {
                     // Last page
                     self.page.resize(self.data_size + dict_size, 255);
-                    self.page[0] = 0x03;
                 }
                 // Write frames in-order (all image frames then all audio frames)
                 pos = dict_size;
@@ -153,14 +158,14 @@ impl<'a> App<'a> {
                     vec_copy(&mut self.page, pos, img_comp, 0, img_comp.len());
                     // Write position in dictionary
                     self.page[(i*4)+4] = pos as u8;
-                    self.page[(i*4)+5] = (pos / 256) as u8;
+                    self.page[(i*4)+5] = (pos / 256 + 0x80) as u8;
                     pos += img_comp.len();
                 }
                 for (i, aud_comp) in self.frame_auds.iter().enumerate() {
                     vec_copy(&mut self.page, pos, aud_comp, 0, aud_comp.len());
                     // Write position in dictionary
                     self.page[(i*4)+6] = pos as u8;
-                    self.page[(i*4)+7] = (pos / 256) as u8;
+                    self.page[(i*4)+7] = (pos / 256 + 0x80) as u8;
                     pos += aud_comp.len();
                 }
                 break;
@@ -198,10 +203,10 @@ impl<'a> App<'a> {
                 }
                 self.page.resize(PAGE_SIZE, 255);
                 // Write dictionary header information
-                self.page[0] = 0x01;
+                self.page[0] = 0xA0;
                 self.page[1] = self.page_num as u8;
-                self.page[2] = (dict_size - 2) as u8;
-                self.page[3] = ((dict_size - 2) / 256) as u8;
+                self.page[2] = (dict_size - 4) as u8;
+                self.page[3] = ((dict_size - 4) / 256 + 0x80) as u8;
                 // Write frames in first page
                 pos = self.first_page_start;
                 for i in 0..self.frame_sizes.len() {
@@ -217,7 +222,7 @@ impl<'a> App<'a> {
                         vec_copy(&mut self.first_page, pos, data, 0, data.len());
                         // Write data position
                         self.page[dict_pos] = (pos % 256) as u8;
-                        self.page[dict_pos+1] = (pos / 256) as u8;
+                        self.page[dict_pos+1] = (pos / 256 + 0x40) as u8;
                         pos += data.len();
                     }
                 }
@@ -226,7 +231,7 @@ impl<'a> App<'a> {
                 for i in 0..self.frame_sizes.len() {
                     if marked[i] == false {
                         // Get position in dictionary
-                        let dict_pos = (2 * i) + 6;
+                        let dict_pos = (2 * i) + 4;
                         // Get data
                         let data = match i % 2 {
                             0 => &self.frame_imgs[i / 2],
@@ -236,7 +241,7 @@ impl<'a> App<'a> {
                         vec_copy(&mut self.page, pos, data, 0, data.len());
                         // Write data position
                         self.page[dict_pos] = (pos % 256) as u8;
-                        self.page[dict_pos+1] = (pos / 256) as u8;
+                        self.page[dict_pos+1] = (pos / 256 + 0x80) as u8;
                         pos += data.len();
                     }
                 }
@@ -244,6 +249,13 @@ impl<'a> App<'a> {
             }
         }
         
+        // Write first/last page flags
+        if self.page_num <= 1 {
+            self.page[0] += 1;  // First page
+        }
+        if !force_write_to_end && next_frame_imgs.len() == 0 {
+            self.page[0] += 2;  // Last page
+        }
         // Write page data
         passerr!(self.out.write(&self.page));
         // Setup next page

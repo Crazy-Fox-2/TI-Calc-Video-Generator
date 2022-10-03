@@ -38,10 +38,15 @@ pub fn save_vid_data(video: &Video, _args: &VArgs) -> Result<(), String> {
     match video.num_frames {
         NumFrames::Rec(_) => Err("Error: Number of frames not known during video data save".to_string()),
         NumFrames::Num(n) => {
-            // Save video information to file
-            let data = strcat!(video.fps.to_string(), "\n", n.to_string(), "\n");
-            let save_file = strcat!(video.folder, "save.txt");
-            fs::write(save_file, data).expect("Unable to write file");
+            if video.temp {
+                // Do not save information, delete folder
+                passerr!(fs::remove_dir_all(&video.folder));
+            } else {
+                // Save video information to file
+                let data = strcat!(video.fps.to_string(), "\n", n.to_string(), "\n");
+                let save_file = strcat!(video.folder, "save.txt");
+                fs::write(save_file, data).expect("Unable to write file");
+            }
             Ok(())
         }
     }
