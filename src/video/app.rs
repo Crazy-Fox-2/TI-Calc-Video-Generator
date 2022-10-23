@@ -8,12 +8,14 @@ use crate::helper::macros::{passerr, strcat};
 use std::io::Write;
 
 const PAGE_SIZE: usize = 16384;
-
+const MAX_CYCLE_COST: usize = 99102500;
+const START_SAMPLE: u8 = 124;
 
 
 pub struct App<'a> {
     total_img_size: usize,
     total_aud_size: usize,
+    total_cycle_cost: usize,
     first_page: Vec<u8>,
     page: Vec<u8>,
     first_page_start: usize,
@@ -26,6 +28,7 @@ pub struct App<'a> {
     frame_imgs: Vec<Vec<u8>>,
     frame_auds: Vec<Vec<u8>>,
     frame_sizes: Vec<usize>,
+    prev_samp: u8,
     args: &'a VArgs
 }
 impl<'a> App<'a> {
@@ -44,6 +47,7 @@ impl<'a> App<'a> {
         Ok ( App {
             total_img_size: 0,
             total_aud_size: 0,
+            total_cycle_cost: 0,
             first_page: first_page,
             page: vec![0xFF; PAGE_SIZE],
             first_page_start: first_page_start,
@@ -56,14 +60,24 @@ impl<'a> App<'a> {
             frame_imgs: Vec::new(),
             frame_auds: Vec::new(),
             frame_sizes: Vec::new(),
+            prev_samp: START_SAMPLE,
             args: args,
         } )
     }
     
     pub fn add_frame(&mut self, img: &[u8], aud: &[u8]) -> Result<(), String> {
-        // Compress image & audio
-        let img_comp = compress::lzss_alt::compress(img);
-        let aud_comp = compress::diff::compress(aud);
+        // Generate image & audio instructions
+        let start_samp = self.prev_samp;
+        let mut instrs = vec![compress::lzss_alt::compress(img), {let (comp, last) = compress::nib_diff::compress(aud, self.prev_samp); self.prev_samp = last; comp}];
+        // Reduce cycle cost
+        let mut cycle_cost = compress::cycle_limit::get_total_cycles(&instrs);
+        if cycle_cost > MAX_CYCLE_COST {
+            cycle_cost = compress::cycle_limit::reduce_cycles_to(&mut instrs, MAX_CYCLE_COST);
+        }
+        self.total_cycle_cost += cycle_cost;
+        // Convert to bytecode
+        let img_comp = compress::instr::gen_bytecode(&instrs[0]);
+        let mut aud_comp = compress::instr::gen_bytecode(&instrs[1]);   aud_comp.push(start_samp);
         // Output to debug file
         let mut file = passerr!(File::create(strcat!("dbg/img_", self.frame_num.to_string(), ".bin")));     passerr!(file.write_all(img));
         let mut file = passerr!(File::create(strcat!("dbg/imgc_", self.frame_num.to_string(), ".bin")));    passerr!(file.write_all(&img_comp));
@@ -87,7 +101,7 @@ impl<'a> App<'a> {
         Ok(())
     }
     
-    pub fn finish(&mut self) -> Result<(usize, usize, usize), String> {
+    pub fn finish(&mut self) -> Result<(usize, usize, usize, usize), String> {
         // Finish writing app pages
         while self.frame_imgs.len() > 0 {
             self.add_page(false)?;
@@ -109,7 +123,7 @@ impl<'a> App<'a> {
         // Write first page to file
         self.out.seek(SeekFrom::Start(0x00)).unwrap();
         passerr!(self.out.write(&self.first_page));
-        Ok((self.page_num, self.total_img_size / self.frame_num, self.total_aud_size / self.frame_num))
+        Ok((self.page_num, self.total_img_size / self.frame_num, self.total_aud_size / self.frame_num, self.total_cycle_cost / self.frame_num))
     }
     
     fn add_page(&mut self, force_write_to_end: bool) -> Result<(), String> {
