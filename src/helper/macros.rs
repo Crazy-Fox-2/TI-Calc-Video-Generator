@@ -42,3 +42,22 @@ macro_rules! strcat {
     }};
 }
 pub(crate) use strcat;
+
+#[macro_export]
+macro_rules! bound {
+    ( $val:expr, $left:expr, $right:expr ) => {
+        {
+            let val = $val;
+            let left = $left;
+            let right = $right;
+            let (left, right) = match left < right {
+                true => (left, right),
+                false => (right, left),
+            };
+            if val < left {left}
+            else if val > right {right}
+            else {val}
+        }
+    };
+}
+pub(crate) use bound;

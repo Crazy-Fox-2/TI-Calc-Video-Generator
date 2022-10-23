@@ -1,0 +1,1349 @@
+.nolist
+#include "ti83plus.inc"
+.list
+.org $4000
+
+
+.addinstr	SLL (HL)    36CB 2 NOP 1
+.addinstr	SLL (IX*)   CBDD 4 ZIX 1 3600
+.addinstr	SLL (IY*)   CBFD 4 ZIX 1 3600
+.addinstr	SLL A       37CB 2 NOP 1
+.addinstr	SLL B       30CB 2 NOP 1
+.addinstr	SLL C       31CB 2 NOP 1
+.addinstr	SLL D       32CB 2 NOP 1
+.addinstr	SLL E       33CB 2 NOP 1
+.addinstr	SLL H       34CB 2 NOP 1
+.addinstr	SLL L       35CB 2 NOP 1
+
+.addinstr	SKIP 1		40	 1 NOP 1
+.addinstr	SKIP 2		49	 1 NOP 1
+.addinstr	SKIP 3		52	 1 NOP 1
+.addinstr	SKIP 4		5B	 1 NOP 1
+
+.addinstr	SUB A,(HL)	96	 1 NOP 1
+.addinstr	SUB A,(IX*) 96DD 3 ZIX 1
+.addinstr	SUB A,(IY*) 96FD 3 ZIX 1
+.addinstr	SUB A,A		97	 1 NOP 1
+.addinstr	SUB A,B		90	 1 NOP 1
+.addinstr	SUB A,C		91	 1 NOP 1
+.addinstr	SUB A,D		92	 1 NOP 1
+.addinstr	SUB A,E		93	 1 NOP 1
+.addinstr	SUB A,H		94	 1 NOP 1
+.addinstr	SUB A,L		95	 1 NOP 1
+.addinstr	SUB A,*		D6	 2 NOP 1
+
+.addinstr	OUT (C),0   71ED 2 NOP 1
+.addinstr	IN (C)      70ED 2 NOP 1
+
+
+interruptMask	.equ	%10000001	; Crystal Timer 3, On Button
+
+
+
+
+imgBuff1_hi		.equ	$E0
+imgBuff1_lo		.equ	$00
+imgBuff2_hi		.equ	$E6
+imgBuff2_lo		.equ	$00
+imgBuff1		.equ	$E000
+imgBuff2		.equ	$E600
+
+
+frequency		.equ	$EC00	; 1 byte for saved frequency
+gcontrast		.equ	$EC01	; 1 byte for saved contrast
+basePage		.equ	$EC02
+calibOptions	.equ	$EC10
+calibOptions_delay	.equ	$EC10
+calibOptions_greyFreq	.equ	$EC11
+calibOptions_contr	.equ	$EC12
+prevArrowKeys	.equ	$EC20
+
+savePos			.equ	$EC14
+spSave			.equ	$EC16
+decomp_saveBC	.equ	$EC18
+decomp_saveDE	.equ	$EC1A
+decomp_saveHL	.equ	$EC1C
+
+
+maskPtr			.equ	$F000
+
+
+
+
+debugOn:
+pageOne:
+	.db $80,$0F, 0,0,0,0	;This is the master field, 0x800
+	.db $80,$12, $01,$04	;signing key ID. This is $01,$05 for the 84+CSE
+	.db $80,$48, "calcMov "	;last nibble is the length
+	.db $80,$81, 1			;num pages (comprssor will change this to the length of the video)
+	.db $80,$90				;disable splash
+	.db $03,$22,$09,$00		;null date stamp
+	.db $02,$00				;null date stamp signature
+	.db $80,$70				;final field
+	
+	jp startApp
+	
+saveFileName:
+	.db $15, "calcMov", 0
+	
+startApp:
+	
+; Initialization {
+	
+	di
+	
+	ld a, %11111101
+	out ($01), a
+	in a, ($01)
+	and %00000001
+	jr z, startApp
+	
+	jr initApp
+	
+	
+	; Load Save Data
+	; Save Enough RAM
+	ld hl, $0008
+	b_call(_EnoughMem)
+	push af
+	; Does Variable Exist?
+	ld hl, saveFileName
+	rst 20h		; rMov9ToOP1
+	b_call(_ChkFindSym)
+	jr nc, saveFound
+	; Enough Free RAM?
+	pop af
+	jr c, saveNoRam
+	; Create Variable
+	ld hl, saveFileName
+	rst 20h		; rMov9ToOP1
+	ld hl, $0004	; File Size
+	b_call(_CreateAppVar)	; Create App
+	ld hl, defaultOptionData
+	ld bc, $0004
+	push de
+	inc de
+	inc de
+	ldir
+	pop de
+	jr saveFoundCopy
+saveFound:
+	; Check if in RAM
+	xor a
+	or b
+	jr nz, saveNoRam
+	pop af
+	jr saveFoundCopy
+saveNoRam:
+	b_jump(_JForceCmdNoChar)
+saveFoundCopy:
+	inc de
+	inc de
+	ex de, hl
+	ld (savePos), hl
+	ld de, calibOptions
+	ld bc, $0004
+	ldir
+	
+	
+initApp:
+	
+	di
+	
+	; Setup page mapping
+	ld a, $82
+	out ($05), a
+	in a, ($06)
+	out ($07), a
+	ld (basePage), a
+	
+	; Setup Interrupt Table
+	im 2
+	ld a, $D0
+	ld i, a
+	ld hl, $D000
+	ld de, $D001
+	ld bc, $0100
+	ld (hl), $C0
+	ldir
+	
+	; Setup Stack
+	ld (spSave), sp
+	ld sp, $FFF0
+	
+	; Copy Ram Code
+	ld hl, ramCode_start
+	ld de, ramCode_RAM
+	ld bc, $0F00
+	ldir
+	
+	; Setup greyscale mask data {
+	ld hl, maskPtr
+	push hl
+	; Put first 3 strips
+	ld (hl), %10010010
+	inc hl
+	ld (hl), %01001001
+	inc hl
+	ld (hl), %00100100
+	; Put rest of first screen
+	ld de, maskPtr+3
+	pop hl
+	ld bc, 64*12
+	ldir
+	; Put second screen
+	ld hl, maskPtr+1
+	ld bc, (64*12) - 1
+	push bc
+	ldir
+	ld a, %01001001
+	ld (de), a
+	; Put third screen
+	inc de
+	ld hl, maskPtr + (64*12) + 1
+	pop bc
+	ldir
+	ld a, %00100100
+	ld (de), a
+	; }
+	
+	; Set important flags
+	res 0, (iy+asm_Flag1)
+	res textInverse, (iy+textFlags)
+	res appAutoScroll, (iy+appFlags)
+	
+	; Set CPU Speed
+	ld a, $01
+	out ($20), a
+	
+	; Set LCD position
+	ld a, $80
+	out ($10), a
+	
+	; Setup Interrupts
+	ld a, interruptMask
+	out ($03), a
+	
+	; Setup Audio High Crystal Timer
+	ld a, $82		; CPU clock / 4
+	out ($36), a
+	ld a, %00000010	; Trigger interupt, don't loop
+	out ($37), a
+	
+	; Clear out image buffers
+	ld de, imgBuff1+1
+	ld bc, $0BFF
+	ld hl, imgBuff1
+	ld (hl), 0
+	ldir
+	
+	
+	
+; }
+	
+	
+; Calibration {
+	
+	
+	ld a, $20
+	ld (calibOptions_delay), a
+	; Set delay {
+	; Note: only works for delay 7 or greater
+	ld a, (calibOptions_delay)
+	ld hl, wasteTime_grey
+calib_putDelay1_loop:
+	; Check if cycles left is greater than 10
+	cp $0B
+	jr c, calib_putDelay1_putLast
+	; Put nop (4 cycles) and loop
+	ld (hl), 0
+	inc hl
+	sub $04
+	jr calib_putDelay1_loop
+calib_putDelay1_putLast:
+	; Put last instruction(s)
+	sub $07
+	jr nz, $+6
+	; Put 7 cycles (ld a, (hl))
+	ld (hl), $86
+	jr calib_putDelay1_putRet
+	dec a
+	jr nz, $+8
+	; Put 8 cycles (nop, nop)
+	xor a
+	ld (hl), a
+	inc hl
+	ld (hl), a
+	jr calib_putDelay1_putRet
+	dec a
+	jr nz, $+9
+	; Put 9 cycles (or a, ret c)
+	ld (hl), $B7
+	inc hl
+	ld (hl), $D8
+	jr calib_putDelay1_putRet
+	; Put 10 cycles (ret c, ret c)
+	ld (hl), $D8
+	inc hl
+	ld (hl), $D8
+calib_putDelay1_putRet:
+	inc hl
+	ld (hl), $C9
+	
+	; Set decompress delay
+	ld hl, wasteTime_decomp
+	ld a, (calibOptions_delay)
+	ld b, a
+	ld (hl), $D8
+	inc hl
+	djnz $-3
+	ex de, hl
+	ld hl, wasteTime_decomp_ROM
+	ldi
+	ldi
+	ldi
+	
+; }
+	
+	
+	; Setup first frame
+	ld hl, $0920
+	push hl
+	ld hl, imgBuff2
+	push hl
+	ld hl, maskPtr
+	push hl
+	ld hl, appEndCode + $4000
+	ld a, 55
+	ld (greyCounterMax), a
+	ld (nextGreyCounter), a
+	ei
+	jp newFrame_RAM
+	
+	jr $+0
+	
+	
+; }
+	
+	
+	
+error83BE:
+	di
+	ld de, $0000
+	ld (curRow), de
+	ld hl, error83BE_text
+	
+	ld b, $03
+	;call dispTextLines
+	
+	ld a, %11111101
+	out ($01), a
+	ld b, $40
+	djnz $-0
+	in a, ($01)
+	and %00000001
+	jr z, $-12
+	
+	ret
+	
+error83BE_text:
+	.db "This app cannot", 0
+	.db "Run on the Ti83+", 0
+	.db "    Sorry!", 0
+	
+	
+endTheVideo:
+decompTimeoutError:
+	di
+	jp endProgram
+	
+	
+	
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;         Paused Video Code         ;
+;    ?? Bytes   299/1,351 Cycles    ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; {
+pausedCode_exx:
+	exx					; 4		; 1
+pausedCode:
+	; Code run while video is paused, stored in ROM
+	; Execution time varies depending on if greyscale is being drawn
+	; Cycle limit is not honored when pausing or unpausing
+	
+	; Decrement input check counter
+	dec ix				; 14	; 2
+	.db $DD				; 4		; 1
+	ld a, h				; 4		; 1
+	.db $DD				; 4		; 1
+	or l				; 4		; 1
+	
+	jr z, pausedCode_checkInput	; 7/12	; 2
+	
+	; Check if draw greyscale
+	ld a, (branchGreyDecomp_RAM+1)	; 7	; 2
+	cp grey_jumpToDecomp - branchGreyDecomp - 2	; 7	; 2
+	jr nz, pausedCode_gotoGrey	; 7/12	; 2
+	
+	; No greyscale draw {
+	
+	; Countdown to next greyscale draw
+	ld a, (nextGreyCounter)	; 13	; 3
+	dec a				; 4		; 1
+	jr z, $+7			; 7/12	; 2
+	ld (nextGreyCounter), a	; 13	; 3
+	jr $+7				; 12	; 2
+	; Mark do greyscale
+	ld a, grey_setPos - branchGreyDecomp - 2	; 7		; 2
+	ld (branchGreyDecomp_RAM+1), a	; 13	; 3
+	
+	; No greyscale draw, waste time
+	ld b, $06			; 7		; 2
+pausedCode_noGreyLoop:
+	call wasteTime_grey	; 27	; 3
+	ex (sp), hl			; 19*	; 1
+	ex (sp), hl			; 19*	; 1
+	ex (sp), hl			; 19*	; 1
+	ex (sp), hl			; 19*	; 1
+	ex (sp), hl			; 19*	; 1
+	ex (sp), hl			; 19*	; 1
+	ex (sp), hl			; 19*	; 1
+	ex (sp), hl			; 19*	; 1
+	nop					; 4*	; 1
+	djnz pausedCode_noGreyLoop	; 8/13	; 2
+	push hl				; 11*	; 1
+	pop hl				; 10*	; 1
+	or a				; 4*	; 1
+	ld a, (hl)			; 7*	; 1
+	jr pausedCode		; 12	; 2
+; }
+	
+pausedCode_gotoGrey:
+	; Waste time then go to greyscale code
+	ld b, $04			; 7		; 2
+	ex (sp), hl			; 19*	; 1
+	ex (sp), hl			; 19*	; 1
+	djnz $-2			; 8/13	; 2
+	jp $+3				; 10*	; 3
+	jp branchGreyDecomp_RAM	; 10	; 3
+	
+pausedCode_checkInput:
+	
+	; Do variable delay
+	ld b, $06			; 7		; 2
+	call wasteTime_grey	; 27	; 3
+	djnz $-3			; 8/13	; 2
+	
+	; Jump foreward or backward one page
+	exx					; 4		; 1
+	call doPageJump		; 261	; 3
+	exx					; 4		; 1
+	
+	; Load right column keys
+	ld a, $FD			; 7		; 2
+	out ($01), a		; 11	; 2
+	in a, ($01)			; 11	; 2
+	ld b, a				; 4		; 1
+	ld a, $FF			; 7		; 2
+	out ($01), a		; 11	; 2
+	
+	; Compute pressed column keys
+	ld a, (prevColumnKeys)	; 13	; 3
+	cpl					; 4		; 1
+	or b				; 4		; 1
+	ld c, a				; 4		; 1
+	ld a, b				; 4		; 1
+	ld (prevColumnKeys), a	; 13	; 3
+	
+	; Check for unpause or temperary unpause
+	ld a, c				; 4		; 1
+	inc a				; 4		; 1
+	jr z, pausedCode_tempUnpause	; 7/12	; 2
+	; No unpause, waste time
+	ld b, $0D			; 7		; 2
+	ex (sp), hl			; 19*	; 1
+	ex (sp), hl			; 19*	; 1
+	push hl				; 11*	; 1
+	pop hl				; 10*	; 1
+	djnz $-4			; 8/13	; 2
+	jr pausedCode		; 12	; 2
+pausedCode_tempUnpause:
+	; Save audio decomp code
+	ld hl, $18 + audio_branchSmallDif*256	; 10	; 3
+	ld (audio_decompBranch-1), hl	; 16	; 3
+	ld a, $D9			; 7		; 2
+	ld (audio_decompBranch-2), a	; 13	; 3
+	; Check if temperary or not
+	xor a				; 4		; 1
+	bit 0, c			; 8		; 2
+	jr nz, $+4			; 7/12	; 2
+	jr $+4				; 12	; 2
+	ld a, 1				; 7		; 2
+	ld (isPaused), a	; 13	; 3
+	
+	; Go through a frame
+	jp newFrame_startLoad_RAM	; 10	; 3
+	
+; }
+	
+doPageJump:		; {		261 cycles (including call instruction)
+	; Read arrow keys
+	ld a, $FE			; 7		; 2
+	out ($01), a		; 11	; 2
+	in a, ($01)			; 11	; 2
+	ld b, a				; 4		; 1
+	ld a, $FF			; 7		; 2
+	out ($01), a		; 11	; 2
+	
+	; Compute pressed arrow keys
+	ld a, (prevArrowKeys)	; 13	; 3
+	cpl					; 4		; 1
+	or b				; 4		; 1
+	ld c, a				; 4		; 1
+	ld a, b				; 4		; 1
+	ld (prevArrowKeys), a	; 13	; 3
+	
+	
+	; Check if jump foreward page
+	bit 2, c			; 8		; 2
+	jr z, doPageJump_jumpForeward	; 7/12	; 2
+	; Waste Time
+	push hl				; 11*	; 1
+	nop					; 4*	; 1
+	nop					; 4*	; 1
+	pop hl				; 10*	; 1
+	jr doPageJump_checkBack	; 12	; 2
+doPageJump_jumpForeward:
+	; Cross page
+	in a, ($07)			; 11	; 2
+	inc a				; 4		; 1
+	out ($07), a		; 11	; 2
+	ld hl, $8000		; 10	; 3
+doPageJump_checkBack:
+	bit 1, c			; 8		; 2
+	jr z, doPageJump_jumpBack	; 7/12	; 2
+	ex (sp), hl			; 19*	; 1
+	ex (sp), hl			; 19*	; 1
+	push hl				; 11*	; 1
+	pop hl				; 10*	; 1
+	or a				; 4*	; 1
+	ld a, (hl)			; 7*	; 1
+	ret					; 10	; 1
+doPageJump_jumpBack:
+	; Check if on the first frame of a page
+	ld a, (framePageCount)	; 13	; 3
+	or a				; 4		; 1
+	jr z, doPageJump_jumpBack_cross	; 7/12	; 2
+	ld a, (hl)			; 7*	; 1
+	jr $+2				; 12*	; 2
+	jr doPageJump_jumpBack_pageStart	; 12	; 2
+doPageJump_jumpBack_cross:
+	; Cross page
+	in a, ($07)			; 11	; 2
+	inc a				; 4		; 1
+	out ($07), a		; 11	; 2
+doPageJump_jumpBack_pageStart:
+	ld hl, $8000		; 10	; 3
+	
+	ret					; 10	; 1
+	
+; }
+	
+	
+	
+	
+	
+	
+; RAM Code. Contains Self-Modifying Code and routines that
+; must be able to be accesed from anywhere on a moment's notice.
+; {
+
+ramCode_start:
+ramCode_RAM	.equ	$C0C0
+	
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;         Interrupt Routine         ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Description:
+;	The interrupt routine.
+;	Pulls the audio output high when crystal timer 3 goes off
+;	12 bytes, 59 cycles
+intRoutine:		; {
+	di				; 4		; 1
+	ex af, af'		; 4		; 1
+	xor a			; 4		; 1
+	out ($00), a	; 11	; 2
+	ld a, $02		; 7		; 2
+	out ($37), a	; 11	; 2
+	ex af, af'		; 4		; 1
+	ei				; 4		; 1
+	ret				; 10	; 1
+	
+	
+; }
+	
+	
+	
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;          End Program          ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; Description:
+;	Ends the Program
+endProgram:		; {
+	di
+	im 1
+	ld sp, (spSave)
+	ld iy, FLAGS
+	
+	; Set Memory Mapping
+	ld a, (basePage)
+	out ($06), a
+	
+	; Reset CPU Speed, Crystal Timers, and Interrupts
+	xor a
+	out ($20), a
+	out ($30), a
+	out ($05), a
+	ld a, %00001011
+	out ($03), a
+	
+	; Set Contrast
+	ld a, (contrast)
+	add a, $D8
+	out ($10), a
+	
+	; Set LCD increment mode
+	ld a, $05
+	out ($10), a
+	
+	; Set Important Flags
+	set graphDraw, (iy+graphFlags)
+	res statsValid, (iy+statFlags)
+	
+	; Save Data
+	;ld de, (savePos)
+	;ld hl, calibOptions
+	;ld bc, $0004
+	;ldir
+	
+	b_jump(_JForceCmdNoChar)
+endProgram_end:
+; }
+	
+	
+tickLoop_ROM:
+tickLoop_RAM	.equ	$-ramCode_start + ramCode_RAM
+	
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;             New Frame             ;
+;      76 Bytes   1,038 Cycles      ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; {
+newFrame:
+newFrame_RAM	.equ	$-tickLoop_ROM + tickLoop_RAM
+	; Failsafe check if last image is finished decompressing
+	ld a, (decomp_branchNoDecompFrame)	; 13	; 3
+	cp $C3				; 7		; 2
+	jp nz, decompTimeoutError	; 10	; 3
+	
+	; Swap greyscale image pointer
+	ld a, (tickLoop_setImgBuff)	; 13	; 3
+	cp imgBuff1_hi		; 7		; 2
+	jr z, $+6			; 7/12	; 2
+	ld a, imgBuff1_hi	; 7		; 2
+	jr $+5				; 12	; 2
+	ld a, (hl)			; 7*	; 1
+	ld a, imgBuff2_hi	; 7		; 2
+	ld (tickLoop_setImgBuff), a	; 13	; 3
+	
+	; Check if we are still paused
+isPaused	.equ	$-tickLoop_ROM + tickLoop_RAM + 1
+	ld a, $00			; 7		; 2
+	or a				; 4		; 1
+	jp nz, pausedCode_exx ; 10	; 3
+	
+	; Read keyboard input, handle pausing {
+	ld a, $FD			; 7		; 2
+	out ($01), a		; 11	; 2
+	in a, ($01)			; 11	; 2
+	ld b, a				; 4		; 1
+	ld a, $FF			; 7		; 2
+	out ($01), a		; 11	; 2
+	
+	; Compute pressed keys
+prevColumnKeys .equ $+1 - tickLoop_ROM + tickLoop_RAM
+	ld a, $FF			; 7		; 2
+	cpl					; 4		; 1
+	or b				; 4		; 1
+	ld c, a				; 4		; 1
+	ld a, b				; 4		; 1
+	ld (prevColumnKeys), a	; 13	; 3
+	
+	; Check if toggle pause
+	bit 0, c			; 8		; 2
+	jr nz, newFrame_noTogglePause	; 7/12	; 2
+newFrame_togglePause:
+	; Pause video
+	; Set paused video execution jump
+	ld hl, pausedCode_exx	; 10	; 3
+	ld (audio_decompBranch-1), hl	; 16	; 3
+	ld a, $C3			; 7		; 2
+	ld (audio_decompBranch-2), a	; 13	; 3
+	ld ix, 200			; 14	; 4
+	jp pausedCode_exx	; 10	; 3
+	
+	
+	
+; }
+newFrame_noTogglePause:
+	
+	call doPageJump		; 261	; 3
+	
+newFrame_startLoad_RAM	.equ	$-tickLoop_ROM + tickLoop_RAM
+	
+	; Increment frame counter
+framePageCount	.equ	$+1 - tickLoop_ROM + tickLoop_RAM
+	ld a, $00			; 7		; 2
+	inc a				; 4		; 1
+	ld (framePageCount), a	; 13	; 3
+	
+	; Check if we must cross a page
+	ld a, (hl)			; 7		; 1
+	inc hl				; 6		; 1
+	rrca				; 4		; 1
+	jr c, newFrame_crossPage ; 7/12	; 2
+	; Check if we must end the video
+	rrca				; 4		; 1
+	jp c, endTheVideo	; 10	; 3
+	push hl				; 11*	; 1
+	pop hl				; 10*	; 1
+	ld a, (hl)			; 7*	; 1
+	or a				; 4*	; 1
+	jr newFrame_page_cont ; 12	; 2
+newFrame_crossPage:
+	; Cross page
+	in a, ($07)			; 11	; 2
+	dec a				; 4		; 1
+	out ($07), a		; 11	; 2
+	ld hl, $8001		; 10	; 3
+	xor a				; 4		; 1
+	ld (framePageCount), a	; 13	; 3
+newFrame_page_cont:
+	
+	; Get pointer to next audio data & image data
+	ld d, (hl)			; 7		; 1
+	inc hl				; 6		; 1
+	ld e, (hl)			; 7		; 1
+	inc hl				; 6		; 1
+	push hl				; 11	; 1
+	pop iy				; 14	; 2
+	
+	; Mark decompression as not done
+	ld hl, $18 + ((decompImg_loop - decomp_branchNoDecompFrame_ROM - 2) * 256)	; 10	; 3
+	ld (decomp_branchNoDecompFrame), hl	; 16	; 3
+	
+	; Set image decompression pointer & variables
+	; Check if decompression or greyscale is goin' on
+	ld a, (branchGreyDecomp_RAM+1)	; 13	; 2
+	cp grey_jumpToDecomp - branchGreyDecomp - 2	; 7	; 2
+	ld a, (tickLoop_setImgBuff)		; 13	; 1
+	jr nz, newFrame_setDImg_grey	; 7/12	; 2
+newFrame_setDImg_decomp:
+	; Directly save decompression image pointer and other variables
+	xor imgBuff2_hi^imgBuff1_hi		; 7		; 2
+	exx					; 4		; 1
+	inc hl				; 6*	; 1
+	ld h, a				; 4		; 1
+	ld l, imgBuff1_lo	; 7		; 2
+	ld b, $01			; 7		; 2
+	ld c, $09			; 7		; 2
+	exx					; 4		; 1
+	inc hl				; 6*	; 1
+	or a				; 4*	; 1
+	dec hl				; 6*	; 1
+	jr newFrame_setDImg_done	; 12	; 2
+newFrame_setDImg_grey:
+	; Setup decompression variables saved in RAM
+	xor imgBuff2_hi^imgBuff1_hi		; 7		; 2
+	ld h, a				; 4		; 1
+	ld l, imgBuff1_lo	; 7		; 2
+	ld (decomp_saveHL), hl	; 16	; 3
+	ld a, $01			; 7		; 2
+	ld (decomp_saveBC+1), a	; 13	; 3
+	or a				; 4*	; 1
+	or a				; 4*	; 1
+newFrame_setDImg_done:
+	
+	; Set audio decomp variables
+	xor a				; 4		; 1
+	ld (audio_decompBranch), a	; 13	; 3
+	ex de, hl			; 4		; 1
+	ld ix, 735			; 14	; 4
+	
+	ld b, $05			; 7		; 2
+	ex (sp), hl			; 19*	; 1
+	ex (sp), hl			; 19*	; 1
+	djnz $-2			; 8/13	; 2
+	
+	or a				; 4*	; 1
+	ret c				; 5*	; 1
+	
+	exx					; 4		; 1
+	
+; }
+	
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;          Decompress Audio         ;
+;       81 Bytes   254 Cycles       ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; a: misc
+; b: counter
+; c: nybble counter
+; d: current byte
+; e: previous sample
+; hl: compression pointer
+; {
+tickLoop_start:
+tickLoop_start_RAM	.equ	$-tickLoop_ROM + tickLoop_RAM
+audStart_RAM		.equ	tickLoop_start_RAM
+	exx					; 4		; 1
+audio_decompBranch	.equ	$+1 - tickLoop_ROM + tickLoop_RAM
+	jr audio_smallDif	; 12	; 2
+	ex (sp), hl			; 19*	; 1
+	ex (sp), hl			; 19*	; 1
+	push hl				; 11*	; 1
+	pop	hl				; 10*	; 1
+	ld a, (hl)			; 7*	; 1
+	inc a				; 4*	; 1
+	dec a				; 4*	; 1
+	jr $+6				; 12	; 2
+audio_largeDif_markLargeDif:
+	xor a				; 4		; 1
+	ld (audio_decompBranch), a	; 13	; 3
+	ld a, (hl)			; 7		; 1
+	inc hl				; 7		; 1
+	rlca				; 4		; 1
+	jr c, audio_largeDif_makeSmallDif	; 7/12	; 2
+	push de				; 11*	; 1
+	or a				; 4*	; 1
+	nop					; 4*	; 1
+	ret c				; 5*	; 1
+	inc de				; 6*	; 1
+	pop de				; 10*	; 1
+	jr audio_putSample	; 12	; 2
+audio_largeDif_makeSmallDif:
+	ld e, a				; 4		; 1
+	ld a, audio_branchSmallDif	; 7		; 2
+	ld (audio_decompBranch), a	; 13	; 3
+	ld a, e				; 4		; 1
+	ld c, $02			; 7		; 2
+	jr audio_putSample	; 12	; 2
+audio_branchSmallDif	.equ	$-1 - audio_decompBranch - tickLoop_ROM + tickLoop_RAM
+audio_smallDif:
+	dec c				; 4		; 1
+	jr z, audio_smallDif_shiftNybble	; 7/12	; 2
+	ld d, (hl)			; 7		; 1
+	inc hl				; 6		; 1
+	ld a, %00001111		; 7		; 2
+	and d				; 4		; 1
+	ret c				; 5*	; 1
+	jp audio_smallDif_doNeg	; 10	; 3
+audio_smallDif_shiftNybble:
+	ld a, d				; 4		; 1
+	rra					; 4		; 1
+	rra					; 4		; 1
+	rra					; 4		; 1
+	rra					; 4		; 1
+	and %00001111		; 7		; 2
+	ld c, $02			; 7		; 2
+audio_smallDif_doNeg	.equ	$-tickLoop_ROM + tickLoop_RAM
+	cp $08				; 7		; 2
+	jr z, audio_largeDif_markLargeDif	; 7/12	; 2
+	jr nc, $+4			; 7/12	; 2
+	jr $+4				; 12	; 2
+	or %11110000		; 7		; 2
+	add a, e			; 4		; 1
+	ld e, a				; 4		; 1
+	ex (sp), hl			; 19*	; 1
+	ex (sp), hl			; 19*	; 1
+	push hl				; 11*	; 1
+	pop hl				; 10*	; 1
+	inc hl				; 6*	; 1
+	dec hl				; 6*	; 1
+	and $FF				; 7*	; 2
+audio_putSample:
+	; Pull audio line low and start timer for pulling the line high
+	out ($38), a		; 11	; 2
+	ld a, 3				; 7		; 2
+	out ($00), a		; 11	; 2
+	
+	; Check for new frame
+	dec ix				; 10	; 2
+	.db $DD				; 4		; 1
+	ld a, h				; 4		; 1
+	.db $DD				; 4		; 1
+	or l				; 4		; 1
+	jp z, newFrame_RAM	; 10	; 2
+	
+	; Swap between audio registers and video registers
+	exx					; 4		; 1
+	
+; }
+	
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;       Output Image to Screen      ;
+;     ?? Bytes     1,038 Cycles     ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; a: misc
+; b: temp row counter
+; c: misc
+; de: mask pointer
+; hl: decompressed image pointer
+; (sp): column counter
+; (sp+1): row counter
+; {
+	
+branchGreyDecomp:
+branchGreyDecomp_RAM	.equ	$-tickLoop_ROM + tickLoop_RAM
+	jr grey_jumpToDecomp; 12	; 2
+	; pop bc			; 10	; 1
+	; dec b				; 4		; 1
+	jr z, grey_endCol	; 7/12	; 2
+	; Keep on drawing this column
+	push bc				; 11	; 1
+	ld b, $07			; 7		; 2
+	jr grey_loopStart	; 12	; 2
+grey_endCol:
+	; Last strip of this column
+	ld b, $09			; 7		; 2
+	push bc				; 11	; 1
+	ld bc, $0118		; 10	; 3
+	ld (grey_endColBranch), bc	; 20	; 4
+	ld b, $03			; 7		; 2
+	jr grey_loopStart	; 12	; 2
+	
+grey_setPos:
+	; First strips of this column
+	; Save decomp variables
+	ld (decomp_saveBC), bc	; 20	; 4
+	ld (decomp_saveDE), de	; 20	; 4
+	ld (decomp_saveHL), hl	; 16	; 3
+	; Get greyscale variables
+	pop de				; 10	; 1
+	pop hl				; 10	; 1
+	pop bc				; 10	; 1
+	; Setup this column
+	ld a, c				; 4		; 1
+	out ($10), a		; 11	; 2
+	inc c				; 4		; 1
+	push bc				; 10	; 1
+	cp $2B				; 7		; 2
+	jr z, grey_setPos_setEnd	; 7/12	; 2
+	inc bc				; 6*	; 1
+	or a				; 4*	; 1
+	jr grey_setPos_next	; 12	; 2
+grey_setPos_setEnd:
+	sub a				; 4		; 1
+	ld (grey_endScreenBranch), a	; 13	; 3
+grey_setPos_next:
+	ld bc, $05C1		; 10	; 3
+	ld (branchGreyDecomp_RAM), bc	; 20	; 3
+	ld b, $05			; 7		; 2
+	; Waste time, 89 cycles
+	ex (sp), hl			; 19*	; 1
+	ex (sp), hl			; 19*	; 1
+	ex (sp), hl			; 19*	; 1
+	ex (sp), hl			; 19*	; 1
+	or a				; 4*	; 1
+	ret c				; 5*	; 1
+	call wasteTime_grey	; 27	; 3
+	jr grey_loopStart-3	; 12	; 2
+	
+grey_jumpToDecomp:
+	; Intermediate jump to tick loop, normal reletive jump too large
+	jp decomp_startNormalLoop	; 10	; 3
+	
+grey_loop:
+	push hl				; 11*	; 1
+	inc hl				; 6*	; 1
+	and (hl)			; 7*	; 1
+	pop hl				; 10*	; 1
+	and (hl)			; 7*	; 1
+	call wasteTime_grey	; 27	; 3
+grey_loopStart:
+	
+	; Get current strip
+	ld a, (de)			; 7		; 1
+	and (hl)			; 7		; 1
+	inc hl				; 6		; 1
+	ld c, a				; 4		; 1
+	ld a, (de)			; 7		; 1
+	cpl					; 4		; 1
+	and (hl)			; 7		; 1
+	or c				; 4		; 1
+	inc hl				; 6		; 1
+	inc de				; 6		; 1
+	
+	; Output strip & loop
+	out ($11), a		; 11	; 2
+	djnz grey_loop		; 8/13	; 2
+	
+grey_endColBranch	.equ	$-tickLoop_ROM + tickLoop_RAM
+	; Loop to sound output
+	jp audStart_RAM		; 10	; 3
+	
+	; Save greyscale registers
+	push hl				; 11	; 1
+	push de				; 11	; 1
+	; End of column, setup next column and jump to decomp
+	ld hl, $00C3 + ((audStart_RAM % 256) * 256)	; 10	; 3
+	ld (grey_endColBranch), hl	; 16	; 3
+	ld a, $03			; 7		; 2
+	ld (nextGreyCounter), a	; 13	; 3
+	ld hl, (grey_jumpToDecomp - (branchGreyDecomp+2))*256 + $18	; 10	; 3
+	ld (branchGreyDecomp_RAM), hl	; 16	; 4
+	; Waste time
+	ld b, $04			; 7		; 2
+	call wasteTime_grey	; 27	; 3
+	djnz $-3			; 8/13	; 2
+	; Load decomp registers
+	ld hl, (decomp_saveHL)	; 16	; 3
+	ld de, (decomp_saveDE)	; 20	; 4
+	ld bc, (decomp_saveBC)	; 20	; 4
+	ld c, $0A			; 7		; 2
+grey_endScreenBranch	.equ	$-tickLoop_ROM + tickLoop_RAM + 1
+	; Jump to decomp
+	jr decompImg_loop	; 12	; 2
+	
+	; End greyscale {
+	
+	; End greyscale screen draw, setup next greyscale countdown
+	ld a, decompImg_loop - $+0	; 7	; 2
+	ld (grey_endScreenBranch), a	; 13	; 3
+	pop af				; 10	; 1
+	pop af				; 10	; 1
+	; Reset greyscale counter
+greyCounterMax	.equ	$+1 - tickLoop_ROM + tickLoop_RAM
+	ld a, $00			; 7		; 2
+	ld (nextGreyCounter), a	; 13	; 3
+	
+	; Setup row & column counters
+	ld hl, $0920		; 10	; 3
+	push hl				; 11	; 1
+	
+	; Setup mask pointer
+greyInitMaskPtr	.equ	$+1 - tickLoop_ROM + tickLoop_RAM
+	ld hl, maskPtr		; 10	; 3
+	inc l				; 4		; 1
+	ld a, $04			; 7		; 2
+	cp l				; 4		; 1
+	jr z, $+4			; 7/12	; 2
+	jr $+4				; 7/12	; 2
+	ld l, $00			; 7		; 2
+	ld (greyInitMaskPtr), hl	; 16	; 3
+	ex de, hl			; 4		; 1
+	
+	; Setup greyscale image pointer
+tickLoop_setImgBuff	.equ	$+2 - tickLoop_ROM + tickLoop_RAM
+	ld hl, imgBuff1		; 10	; 3
+	; Save greyscale registers
+	push hl				; 11	; 1
+	push de				; 11	; 1
+	
+	; Setup decomp branch
+	ld hl, (grey_jumpToDecomp - (branchGreyDecomp+2))*256 + $18
+	ld (branchGreyDecomp_RAM), hl
+	
+	ld hl, (decomp_saveHL)	; 16	; 3
+	ld de, (decomp_saveDE)	; 20	; 4
+	ld c, $09			; 7		; 2
+	jr decompImg_loop	; 12	; 2
+	
+; }
+	
+	
+; }
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;          Decompress Image         ;
+;     242 Bytes    1,038 Cycles     ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; a: misc
+; b: instruction length counter
+; c: nugget counter
+; de: instruction parameter
+; hl: decompressed image pointer
+; iy: compressed image pointer
+; {
+	
+decomp_startNormalLoop:		; {
+decomp_startNormalLoop_RAM	.equ	$-tickLoop_ROM + tickLoop_RAM
+	jp wasteTime_decomp	; 10	; 3
+	ld c, $0E			; 7		; 2
+decomp_branchNoDecompFrame	.equ	$-tickLoop_ROM + tickLoop_RAM
+decomp_branchNoDecompFrame_ROM:
+	;jr decompImg_loop	; 12	; 2		SMC
+	jp decomp_noNugsWaitNextFrame_RAM	; 10	; 3
+; }
+	
+
+	
+; Decompress Instruction Nuggets { 22 bytes
+	; 1 Nugget takes 66 cycles
+decompNugget_rle:
+	ld a, (hl)			; 7*	; 1
+	ld a, d				; 4		; 1
+	ld (hl), a			; 7		; 1
+	ld d, e				; 4		; 1
+	ld e, a				; 4		; 1
+	inc hl				; 6		; 1
+	jp decompImg_loop - tickLoop_ROM + tickLoop_RAM	; 10	; 3
+decompNugget_lzss:
+	or a				; 4*	; 1
+	ld a, (de)			; 7		; 1
+	ld (hl), a			; 7		; 1
+	inc de				; 6		; 1
+	inc hl				; 6		; 1
+	jr decompImg_loop	; 12	; 2
+decompNugget_stream:
+	ld a, (iy)			; 19	; 3
+	ld (hl), a			; 7		; 1
+	inc iy				; 10	; 2
+	inc hl				; 6		; 1
+; }
+	
+decompImg_loop:	; { 5 bytes
+	; Decrement current nugget counter
+	dec c				; 4		; 1
+	jr z, decomp_waitForNextTick ; 7/12 ; 2
+	; Go to decompression nugget
+decompNuggetBranch	.equ	$+1 - tickLoop_ROM + tickLoop_RAM
+	djnz $+2			; 13/8	; 2
+decomp_lzssOff	.equ	decompNugget_lzss - $+0
+decomp_rleOff	.equ	decompNugget_rle - $+0
+decomp_streamOff	.equ	decompNugget_stream - $+0
+	; }
+	; Read next nugget { 86 bytes
+	; Getting a new instruction takes 4 nuggets
+	dec c				; 4		; 1
+	jr z, readNugget_waitNextTickLong+10 ; 7/12	; 2
+	dec c				; 4		; 1
+	jr z, readNugget_waitNextTickLong+5	 ; 7/12	; 2
+	dec c				; 4		; 1
+	jr z, readNugget_waitNextTickLong	 ; 7/12	; 2
+	; Get output size
+	ld a, (iy)			; 19	; 3
+	inc iy				; 10	; 2
+	ld d, a				; 4		; 1
+	and %00111111		; 7		; 2
+	ld b, a				; 4		; 1
+	ld a, d				; 4		; 1
+	; Check if done decompressing
+	inc d				; 4		; 1
+	jr z, readNugget_endDecomp	; 7/12	; 2
+	; Branch based on instruction
+	rlca				; 4		; 1
+	jr c, readNugget_noRLE ; 7/12 ; 2
+	rlca				; 4		; 1
+	jr c, readNugget_wordRLE ; 7/12 ; 2 \
+	inc de				; 6*	; 1		|
+	ld de, $0000		; 10	; 3		|
+	push de				; 11*	; 1		|
+	pop de				; 10*	; 1		|
+	ld a, (de)			; 7*	; 1		|
+	ld a, (de)			; 7*	; 1		| 70
+	jr $+12				; 12	; 2		|
+readNugget_wordRLE:
+	ld d, (iy)			; 19	; 3		|
+	ld e, (iy+1)		; 19	; 3		|
+	inc iy				; 10	; 2		|
+	inc iy				; 10	; 2		/
+	inc b				; 4		; 1
+	inc b				; 4		; 1
+	ld a, decomp_rleOff	; 7		; 1
+	jr $+2				; 12*	; 2
+	jr readNugget_putBranch ; 12 ; 2
+readNugget_noRLE:
+	rlca				; 4		; 1
+	jr c, readNugget_LZSS ; 7/12 ; 2
+	ex (sp), hl			; 19*	; 1
+	ex (sp), hl			; 19*	; 1
+	push hl				; 11*	; 1
+	inc hl				; 6*	; 1
+	pop hl				; 10*	; 1
+	inc b				; 4		; 1
+	or a				; 4*	; 1
+	ret c				; 5*	; 1
+	ld a, decomp_streamOff; 7	; 2
+	jr readNugget_putBranch ; 12 ; 2
+readNugget_LZSS:
+	push hl				; 11	; 1
+	ld e, (iy)			; 19	; 3
+	inc iy				; 10	; 2
+	xor a				; 4		; 1
+	ld d, a				; 4		; 1
+	or a				; 4*	; 1
+	sbc hl, de			; 15	; 2
+	ex de, hl			; 4		; 1
+	pop hl				; 10	; 1
+	inc b				; 4		; 1
+	ld a, decomp_lzssOff; 7		; 1
+readNugget_putBranch:
+	ld (decompNuggetBranch), a ; 13 ; 3
+	inc b				; 4		; 1
+	jr decompImg_loop	; 12	; 1
+	; }
+	
+readNugget_waitNextTickLong:	; { 11 bytes
+	; Exited because we had 3 nuggets left
+	ex (sp), hl			; 19*	; 1
+	ex (sp), hl			; 19*	; 1
+	ld a, (hl)			; 7*	; 1
+	in a, ($01)			; 11*	; 2
+	; Exited because we had 2 nuggets left
+	ex (sp), hl			; 19*	; 1
+	ex (sp), hl			; 19*	; 1
+	ld a, (hl)			; 7*	; 1
+	in a, ($01)			; 11*	; 2
+	; Exited because we had 1 nugget left
+	push hl				; 11*	; 1
+	inc hl				; 6*	; 1
+	inc l				; 4*	; 1
+	pop hl				; 10*	; 1
+	inc b				; 4*	; 1
+	jr decomp_waitForNextTick	; 12	; 2
+; }
+	
+setupGreyscaleDuringDecomp:	; { 7 bytes
+	ld a, grey_setPos - branchGreyDecomp - 2	; 7		; 2
+	ld (branchGreyDecomp_RAM+1), a	; 13	; 3
+	jp audStart_RAM		; 10	; 2
+; }
+	
+; Check if we switch to greyscale (run at end of decomp tick)
+decomp_waitForNextTick:	; { 16 bytes
+	or a				; 4*	; 1
+nextGreyCounter	.equ	$+1 - tickLoop_ROM + tickLoop_RAM
+	ld a, $20			; 7		; 2
+	dec a				; 4		; 1
+	jr z, setupGreyscaleDuringDecomp	; 7/12	; 2
+	ld (nextGreyCounter), a	; 13	; 3
+	
+	inc bc				; 6*	; 1
+	dec bc				; 6*	; 1
+	jp audStart_RAM		; 10	; 3
+; }
+	
+readNugget_endDecomp:	; { 32 bytes
+	; Setup branch for end-of-frame delay
+	ld hl, $C3 + ((decomp_noNugsWaitNextFrame_RAM % 256) * 256)	; 10	; 3
+	ld (decomp_branchNoDecompFrame), hl	; 16	; 3
+	; Delay until start of next tick
+	; Skip extra nugget delays if this was the last nugget
+	ld b, c				; 4		; 1
+	dec c				; 4		; 1
+	jr z, readNugget_endDecomp_noNugLoop	; 7/12	; 2
+	; Delay for remainder of tick, 66 cycles ber remaining nuggets
+readNugget_endDecomp_loopRNugs:
+	ex (sp), hl			; 19	; 1
+	ex (sp), hl			; 19	; 1
+	ld a, (hl)			; 7		; 1
+	or a				; 4		; 1
+	or a				; 4		; 1
+	djnz readNugget_endDecomp_loopRNugs	; 13/8	; 2
+	dec bc				; 6*	; 1
+	or a				; 4*	; 1
+readNugget_endDecomp_noNugLoop:
+	ex (sp), hl			; 19*	; 1
+	ex (sp), hl			; 19*	; 1
+	ex (sp), hl			; 19*	; 1
+	ex (sp), hl			; 19*	; 1
+	push hl				; 11*	; 1
+	pop hl				; 10*	; 1
+	or a				; 4*	; 1
+	ret c				; 5*	; 1
+	jr decomp_waitForNextTick	; 12	; 2
+; }
+	
+decomp_noNuggetsWaitNextFrame:	; { 11 bytes
+decomp_noNugsWaitNextFrame_RAM	.equ $-tickLoop_ROM + tickLoop_RAM
+	ld b, 18			; 7*	; 2
+	ex (sp), hl			; \
+	ex (sp), hl			; | 	; 913*	; 4
+	djnz $-2			; /
+	inc hl				; 6*	; 1
+	dec hl				; 6*	; 1
+	jr decomp_waitForNextTick	; 12	; 2
+; }
+wasteTime_decomp_ROM:
+	jp decomp_startNormalLoop_RAM+3
+
+wasteTime_decomp	.equ	$C800
+	
+; }
+	
+	
+	
+wasteTime_grey_ROM:
+wasteTime_grey	.equ	$-tickLoop_ROM + tickLoop_RAM
+	ret					; 10	; 1
+	
+	
+; }
+	
+	
+	
+	
+	
+	
+calibScrn_data:
+	.db $00, $00, $00, $00
+	.db $00, %00001010, $00, %10101011
+	.db $00, $FF
+	.db %00001010, %11110101, %10101011, %01010100
+	.db $FF, $00
+	.db $FF, %00001010, $FF, %10101011
+	.db $FF, $FF, $FF, $FF
+	
+	.db $00, $00, $00, $00
+	.db $00, %00010101, $00, %01010111
+	.db $00, $FF
+	.db %00010101, %11101010, %01010111, %10101000
+	.db $FF, $00
+	.db $FF, %00010101, $FF, %01010111
+	.db $FF, $FF, $FF, $FF
+	
+calibScrn_range:
+	.db $20, $22
+	.db $20, $5C
+	.db $98, $E8
+	.db $20, $47
+	
+defaultOptionData:
+	.db 1
+	.db 6
+	.db 180
+	.db $18
+	
+calibScrn_text:
+	.db $1C, " DMode: ", 0
+	.db "  Delay: ", 0
+	.db "   Freq: ", 0
+	.db "  Contr: ", 0
+	
+	
+appEndCode:
+; Information for the video compiler
+	.dw $0000
+	.dw $0000
+	.dw $0000
+	.dw $0000
+	.dw $0000
+	.dw $0000
+	.dw $0000
+	.dw $0000
+
+	
+.end
+.end
+	

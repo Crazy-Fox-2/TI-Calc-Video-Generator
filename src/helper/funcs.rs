@@ -22,6 +22,15 @@ pub fn print_if(print: String, verbose: bool) {
     }
 }
 
+pub fn redist_range(val: f64, la: f64, ra: f64, lb: f64, rb: f64) -> f64 {
+    let range_a = ra - la;
+    let pos = (val - la) / range_a;
+    let range_b = rb - lb;
+    let newval = (pos * range_b) + lb;
+    newval
+}
+
+
 
 pub fn file_from_wd_or_exe(name: &str) -> Result<Vec<u8>, String> {
     // Searches for the given file in the path of the executable then in the working directory

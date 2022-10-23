@@ -64,7 +64,7 @@ pub fn extract_video(args: &VArgs, folder_path: &str, vid_path: &str) -> Result<
     // Extract audio
     print_ln_if("Extracting audio stream".to_string(), !args.mute);
     let mut aname_arg = folder_path.to_string();    aname_arg.push_str("audio.wav");
-    match Command::new("ffmpeg").args(["-i", vid_path, "-f", "wav", "-ar", "10920", "-ac", "1", "-vn", &aname_arg]).output() {
+    match Command::new("ffmpeg").args(["-i", vid_path, "-f", "wav", "-ar", "10240", "-ac", "1", "-vn", &aname_arg]).output() {
         Ok(_) => {},
         Err(e) => {
             return Err(format!("Error extracting audio: {}", e));

@@ -1,11 +1,10 @@
 
 
-pub mod diff;
-//pub mod rlelzss;
-pub mod accel;
-pub mod lzss_alt;
+pub mod cycle_limit;
 pub mod graph_solve;
+pub mod instr;
+pub mod lzss_alt;
+pub mod nib_diff;
 pub mod none;
-pub mod rle_lzss;
 
 

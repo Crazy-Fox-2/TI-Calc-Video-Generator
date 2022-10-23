@@ -1,4 +1,6 @@
 use image::GrayImage;
+use crate::helper::funcs::redist_range;
+use crate::helper::macros::bound;
 
 
 // Warning,
@@ -24,22 +26,7 @@ fn nearest_shade(shade: u8, allowed: &Vec<u8>) -> u8 {
     closest
 }
 
-macro_rules! bound {
-    ( $val:expr, $left:expr, $right:expr ) => {
-        {
-            let val = $val;
-            let left = $left;
-            let right = $right;
-            let (left, right) = match left < right {
-                true => (left, right),
-                false => (right, left),
-            };
-            if val < left {left}
-            else if val > right {right}
-            else {val}
-        }
-    };
-}
+
 
 
 pub fn dither(source: &GrayImage, kind: char, shades: Vec<u8>) -> GrayImage {
@@ -100,13 +87,7 @@ pub fn dither(source: &GrayImage, kind: char, shades: Vec<u8>) -> GrayImage {
                 MASK[y as usize % 8][x as usize % 8]
             }
 
-            fn redist_range(val: f64, la: f64, ra: f64, lb: f64, rb: f64) -> f64 {
-                let range_a = ra - la;
-                let pos = (val - la) / range_a;
-                let range_b = rb - lb;
-                let newval = (pos * range_b) + lb;
-                newval
-            }
+            
             
             // Prior to going through the algorithm normally we do one pass changing the shades
             // since as best I can tell this algorithm only works if the shades are evenly spaced
@@ -130,7 +111,7 @@ pub fn dither(source: &GrayImage, kind: char, shades: Vec<u8>) -> GrayImage {
                     // Redistribute
                     let fval = redist_range(val.try_into().unwrap(), shades[ind-1].try_into().unwrap(), shades[ind].try_into().unwrap(), (ind-1) as f64, ind as f64);
                     // Pass through mask
-                    let newval = bound!(fval + apply_mask(x, y), 0.0, 3.0);
+                    let newval: f64 = bound!(fval + apply_mask(x, y), 0.0, 3.0);
                     // Change back into allowed shades
                     val = shades[newval.round() as usize];
                     pxl[0] = val;

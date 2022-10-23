@@ -38,7 +38,7 @@ impl<'a> Video<'a> {
         print_ln_if("".to_string(), !self.args.mute);
         let mut app = App::new(self.args, &self)?;
         let mut cur_frame = 0;
-        let mut auditer = audiostream::AudIter::new(&strcat!(self.folder, "audio.wav"))?;
+        let mut auditer = audiostream::AudIter::new(&strcat!(self.folder, "audio.wav"), 48, 200)?;
         
         // Skip audio before start of encoded video
         for _i in 0..self.start {
@@ -80,10 +80,11 @@ impl<'a> Video<'a> {
             cur_frame += 1;
         }
         // Finish app
-        let (num_pages, avg_img, avg_aud) = app.finish()?;
+        let (num_pages, avg_img, avg_aud, avg_cycle) = app.finish()?;
         app.print_progress(self.durr, num_pages);
         print_ln_if(format!("Avg. Img Frame Size: {}", avg_img), !self.args.mute);
         print_ln_if(format!("Avg. Aud Frame Size: {}", avg_aud), !self.args.mute);
+        print_ln_if(format!("Avg.  Frame  Cycles: {}", avg_cycle), !self.args.mute);
         // Run rabbitsign
         let bin_path = strcat!(self.folder, "out.bin");
         passerr!(Command::new("rabbitsign").args(["-g", "-v", "-P", "-p", &bin_path, "-o", &strcat!(self.args.out, ".8xk")]).output());

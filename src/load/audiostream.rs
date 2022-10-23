@@ -1,6 +1,7 @@
 use std::io::{Read, BufReader, Bytes};
 use std::fs::File;
-use crate::helper::macros::passerr;
+use crate::helper::macros::{passerr, bound};
+use crate::helper::funcs::redist_range;
 
 
 // Simple iterator over all the samples in a wave file
@@ -8,29 +9,35 @@ use crate::helper::macros::passerr;
 
 
 pub struct AudIter {
-    bytes: Bytes<BufReader<File>>
+    bytes: Bytes<BufReader<File>>,
+    range_low: i16,
+    range_high: i16,
 }
 impl Iterator for AudIter {
     type Item = Vec<u8>;
     
     fn next(&mut self) -> Option<Self::Item> {
-        // Read 546 samples
-        let mut samps: Vec<u8> = Vec::with_capacity(546);
-        for _i in 0..546 {
+        // Read 512 samples
+        let mut samps: Vec<u8> = Vec::with_capacity(512);
+        for _i in 0..512 {
             // Read sample from bytestream
             self.bytes.next();      // Ignore least-significant byte
-            let samp = match self.bytes.next() {
-                Some(s) => (s.unwrap() as i8 as i16) + 128,
+            let mut signed_samp = match self.bytes.next() {
+                Some(s) => s.unwrap() as i8 as i16,
                 None => return None,
-            } / 2;
-            samps.push(samp as u8);
+            };
+            //println!("{}", signed_samp);
+            signed_samp = signed_samp * 2;
+            signed_samp = bound!(signed_samp, -128, 128);
+            let samp = redist_range(signed_samp as f64, -128.0, 128.0, self.range_low as f64, self.range_high as f64) as u8;
+            samps.push(samp);
         }
         Some(samps)
     }
 }
 
 impl AudIter {
-    pub fn new(fname: &str) -> Result<AudIter, String> {
+    pub fn new(fname: &str, range_low: i16, range_high: i16) -> Result<AudIter, String> {
         // Load wave file provided
         let f = passerr!(File::open(fname));
         let mut bytes = BufReader::new(f).bytes();
@@ -50,7 +57,7 @@ impl AudIter {
         for _ in 0..4 {
             bytes.next();
         }
-        Ok(AudIter {bytes: bytes})
+        Ok(AudIter {bytes: bytes, range_low: range_low, range_high: range_high})
     }
 }
 

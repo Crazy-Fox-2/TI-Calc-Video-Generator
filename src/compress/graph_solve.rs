@@ -7,6 +7,26 @@
 // compressed result which is as small as possible
 
 
+use crate::compress::instr::{/*Instr,*/ InstrGen};
+use crate::compress::cycle_limit::CycleInstr;
+
+
+pub trait GraphFuncs {
+    fn get_instr_info(&self, data: &[u8], pos: usize) -> Vec<(usize, usize)>;   // Returns Vec<len, id>
+    fn get_step_cost(&self, data: &[u8], pos: usize, uid: usize) -> isize;
+    fn get_entry_cost(&self, data: &[u8], pos: usize, uid: usize) -> isize;
+    fn get_cont_cost(&self, data: &[u8], pos: usize, uid: usize, rel_pos: usize) -> isize;
+}
+
+pub struct GraphSolve<'a> {
+    numt: usize,
+    data: &'a [u8],
+    gtypes: Vec<Box<dyn GraphFuncs>>,
+    itypes: Vec<Box<dyn InstrGen<dyn CycleInstr>>>
+}
+
+
+
 #[derive(Clone)]
 #[derive(Copy)]
 struct Node {
@@ -26,22 +46,14 @@ impl Node {
     
 
 
-pub struct GraphSolve<'a> {
-    numt: usize,
-    data: &'a[u8],
-    get_instrs: &'a[&'a dyn Fn(&[u8], usize)->Vec<(usize, usize)>], // Data, Pos -> Vec<len, id>
-    get_step_costs: &'a[&'a dyn Fn(&[u8], usize, usize)->isize],    // Data, Pos, Id -> cost
-    get_entry_costs: &'a[&'a dyn Fn(&[u8], usize, usize)->isize],   // Data, Pos, Id -> cost
-    get_cont_costs: &'a[&'a dyn Fn(&[u8], usize, usize, usize)->isize], // Data, Pos, Id, RelPos -> cost
-    gen_bytecodes: &'a[&'a dyn Fn(&[u8], usize, usize, usize)->Vec<u8>],    // Data, Pos, Id, RelPos -> Vec<bytes>
+pub fn compress(data: &[u8], instr_types: Vec<Box<dyn InstrGen<dyn CycleInstr>>>, graph_types: Vec<Box<dyn GraphFuncs>>) -> Vec<Box<dyn CycleInstr>> {
+    let gs: GraphSolve = GraphSolve { numt: instr_types.len(), data: data, itypes: instr_types, gtypes: graph_types };
+    let graph = gs.make_graph();
+    gs.gen_instrs(graph)
 }
+
+
 impl GraphSolve<'_> {
-    
-    pub fn compress(nt: usize, d: &[u8], ins: &[&dyn Fn(&[u8], usize) -> Vec<(usize, usize)>], stcs: &[&dyn Fn(&[u8], usize, usize) -> isize], encs: &[&dyn Fn(&[u8], usize, usize) -> isize], ctcs: &[&dyn Fn(&[u8], usize, usize, usize) -> isize], bcs: &[&dyn Fn(&[u8], usize, usize, usize)->Vec<u8>]) -> Vec<u8> {
-        let gs = GraphSolve { numt: nt, data: d, get_instrs: ins, get_step_costs: stcs, get_entry_costs: encs, get_cont_costs: ctcs, gen_bytecodes: bcs};
-        gs.gen_bytecode(gs.make_graph())
-    }
-    
     
     fn make_graph(&self) -> Vec<Vec<Node>> {
         // Most of the magic is done in here
@@ -74,10 +86,6 @@ impl GraphSolve<'_> {
             
             let mut row: Vec<Node> = Vec::new();
             
-            if pos == 10 {
-                print!("{}", row.len());
-            }
-            
             // Continue instructions from last frame
             for (ind, node) in graph[pos-1].iter().enumerate() {
                 let ind = ind as isize;
@@ -91,8 +99,8 @@ impl GraphSolve<'_> {
                 }
             }
             // Get new instructions
-            for (ind, getinst) in self.get_instrs.iter().enumerate() {
-                let insts: Vec<(usize, usize)> = getinst(self.data, pos-1);
+            for ind in 0..self.numt {
+                let insts: Vec<(usize, usize)> = self.gtypes[ind].get_instr_info(self.data, pos-1);
                 'iloop: for (len, id) in insts.iter() {
                     // Add if given id does not match one we're already doing
                     for node in graph[pos-1].iter() {
@@ -110,12 +118,10 @@ impl GraphSolve<'_> {
             let mut entr_costs: Vec<isize> = Vec::with_capacity(row.len());
             let mut cont_costs: Vec<isize> = Vec::with_capacity(row.len());
             for node in row.iter() {
-                let stc = self.get_step_costs[node.instr_type];
-                let enc = self.get_entry_costs[node.instr_type];
-                let ctc = self.get_cont_costs[node.instr_type];
-                step_costs.push(stc(self.data, pos-1, node.id));
-                entr_costs.push(enc(self.data, pos-1, node.id));
-                cont_costs.push(ctc(self.data, pos-1, node.id, node.rel_pos));
+                let gen = &self.gtypes[node.instr_type];
+                step_costs.push(gen.get_step_cost(self.data, pos-1, node.id));
+                entr_costs.push(gen.get_entry_cost(self.data, pos-1, node.id));
+                cont_costs.push(gen.get_cont_cost(self.data, pos-1, node.id, node.rel_pos));
             }
             // Find best path to each valid instruction
             if pos == 1 {
@@ -153,10 +159,10 @@ impl GraphSolve<'_> {
         
     }
     
-    fn gen_bytecode(&self, graph: Vec<Vec<Node>>) -> Vec<u8> {
+    fn gen_instrs(&self, graph: Vec<Vec<Node>>) -> Vec<Box<dyn CycleInstr>> {
         
         // Follow path backwards and construct the list of instruction bytecodes
-        let mut list: Vec<Vec<u8>> = Vec::new();
+        let mut list: Vec<Box<dyn CycleInstr>> = Vec::new();
         // Get finishing instruction with the lowest total cost
         let mut min_cost = isize::max_value();
         let mut cur_node = &graph[graph.len()-1][0];
@@ -171,8 +177,8 @@ impl GraphSolve<'_> {
         for pos in (0..graph.len()-1).rev() {
             if cur_node.from != cur_node.prev_ind {
                 // This is the first node on this instruction to be encoded
-                let gen = self.gen_bytecodes[cur_node.instr_type];
-                list.push(gen(self.data, pos, cur_node.id, len));
+                let gen = &self.itypes[cur_node.instr_type];
+                list.push(gen.gen_instr(self.data, pos, cur_node.id, len));
                 len = 0;
             }
             if cur_node.from >= 0 {
@@ -182,14 +188,10 @@ impl GraphSolve<'_> {
             len += 1;
         }
 
-        // Combine into single stream of bytecodes
-        let mut bytecode: Vec<u8> = Vec::with_capacity(min_cost as usize);
-        for mut inst_bc in list.into_iter().rev() {
-            bytecode.append(&mut inst_bc);
-        }
+        // Reverse list
+        let list = list.into_iter().rev().collect();
         
-        bytecode
-        
+        list
     }
     
     
