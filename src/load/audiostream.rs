@@ -27,7 +27,7 @@ impl Iterator for AudIter {
                 None => return None,
             };
             //println!("{}", signed_samp);
-            signed_samp = signed_samp * 2;
+            signed_samp *= 2;
             signed_samp = bound!(signed_samp, -128, 128);
             let samp = redist_range(signed_samp as f64, -128.0, 128.0, self.range_low as f64, self.range_high as f64) as u8;
             samps.push(samp);

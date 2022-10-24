@@ -12,7 +12,7 @@ use crate::compress::cycle_limit::{CycleInstr};
 pub fn compress(data: &[u8], start: u8) -> (Vec<Box<dyn CycleInstr>>, u8) {
 
     // Compress audio samples
-    let mut prev_samp = start;
+    let mut prev_samp = start / 2;
     let mut prev_nib = false;
     let mut instrs: Vec<Box<dyn CycleInstr>> = Vec::new();
     let mut diffs: Vec<u8> = Vec::new();
@@ -45,7 +45,7 @@ pub fn compress(data: &[u8], start: u8) -> (Vec<Box<dyn CycleInstr>>, u8) {
         instrs.push(Box::new(ByteInstr{diffs: diffs}));
     }
     
-    (instrs, prev_samp)
+    (instrs, prev_samp*2)
     
 }
 
@@ -129,8 +129,8 @@ impl Instr for NibbleInstr {
             byte += 0x80;
             bytecode.push(byte);
         }
-        let len = bytecode.len();
-        bytecode[len-1] += 1;
+        //let len = bytecode.len();
+        //bytecode[len-1] += 1;
         bytecode
     }
     fn get_comp_size(&self) -> usize {
