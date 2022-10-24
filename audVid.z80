@@ -1,0 +1,2315 @@
+; 
+; audVid
+; Simultaneous Audio & Video player for the Ti-83+SE and derivatives
+; 
+; Last modified: 3 Oct 2022
+;
+
+.nolist
+#include "ti83plus.inc"
+.list
+.org $4000
+
+
+
+
+; Add some useful undocumented & combination instructions
+
+.addinstr	SLI (HL)    36CB 2 NOP 1
+.addinstr	SLI (IX*)   CBDD 4 ZIX 1 3600
+.addinstr	SLI (IY*)   CBFD 4 ZIX 1 3600
+.addinstr	SLI A       37CB 2 NOP 1
+.addinstr	SLI B       30CB 2 NOP 1
+.addinstr	SLI C       31CB 2 NOP 1
+.addinstr	SLI D       32CB 2 NOP 1
+.addinstr	SLI E       33CB 2 NOP 1
+.addinstr	SLI H       34CB 2 NOP 1
+.addinstr	SLI L       35CB 2 NOP 1
+
+.addinstr	SUB A,(HL)	96	 1 NOP 1
+.addinstr	SUB A,(IX*) 96DD 3 ZIX 1
+.addinstr	SUB A,(IY*) 96FD 3 ZIX 1
+.addinstr	SUB A,A		97	 1 NOP 1
+.addinstr	SUB A,B		90	 1 NOP 1
+.addinstr	SUB A,C		91	 1 NOP 1
+.addinstr	SUB A,D		92	 1 NOP 1
+.addinstr	SUB A,E		93	 1 NOP 1
+.addinstr	SUB A,H		94	 1 NOP 1
+.addinstr	SUB A,L		95	 1 NOP 1
+.addinstr	SUB A,*		D6	 2 NOP 1
+
+.addinstr	OUT (C),0   71ED 2 NOP 1
+.addinstr	IN (C)      70ED 2 NOP 1
+
+.addinstr	LD HL,DE	626B 2 NOP 1
+.addinstr	LD HL,BC	6069 2 NOP 1
+.addinstr	LD DE,HL	545D 2 NOP 1
+.addinstr	LD DE,BC	5059 2 NOP 1
+.addinstr	LD BC,HL	444D 2 NOP 1
+.addinstr	LD BC,DE	424B 2 NOP 1
+
+
+
+
+; Most RAM definitions
+
+
+saveLoc_raw	.equ	$9872
+savePage_raw .equ	$9874
+
+
+intPosA		.equ	$C2
+intPosB		.equ	$C0
+
+
+; These variables will have default values copied into them before jumping to video player
+copy_to_def	.equ	$CA00
+isPaused	.equ	$CA00		; Flag indicating if we are currently paused
+decState	.equ	$CA01		; Current state of the decompression, FF=start next, 00=workin' on it, 01=waiting for next frame to start
+curImgBuff	.equ	$CA02		; Pointer to image buffer we will be decompressing into
+greyImgBuff	.equ	$CA04		; Pointer to image buffer we will be drawing to the screen
+inVid		.equ	$CA06		; Flag indicating if we are playing the video or if we are in the options menu
+audEn		.equ	$CA07		; Flag indicating if audio is enabled or disabled
+greyMask_cur .equ	$CA08		; Current postion of the greyscale mask
+curAudBuff	.equ	$CA0A		; Pointer to audio buffer to decompress into
+startSamp	.equ	$CA0C		; Sample value that the new frame will start with
+
+; These variables will not
+decStartPtr	.equ	$CA10		; Pointer to the start of the compressed image of a frame
+winddown	.equ	$CA12		; Winddown counter, when at the final frame this will decrement each frame. Once reaching 0 the application will exit.
+winddown_default = $02
+prevEnter	.equ	$CA14		; Previous keyboard value for the enter key
+prevArrow	.equ	$CA15		; Previous keyboard value for the arrow keys
+frameList_cur .equ	$CA18		; Current frame lookup position
+hlSave		.equ	$CA1A		; Temperary save location for hl used in greyscale routine
+compImgStart .equ	$CA1C		; Pointer to where the compressed image is for this frame
+compAudStart .equ	$CA1E		; Pointer to where the compressed audio is for this frame
+
+calcSpeed	.equ	$CA20		; Calculator speed
+savePage	.equ	$CA21		; Save data page
+saveLoc		.equ	$CA22		; Save data location
+sav_refr	.equ	$CA24		; Refresh rate
+sav_contr	.equ	$CA25		; Contrast
+spSave_os	.equ	$CA26		; Backup of stack pointer when app started for the first time
+spSave_opt	.equ	$CA28		; Backup of stack pointer when setting up options menu
+autoLCD_A	.equ	$CA2A		; Backup of the auto-lcd delay settings
+autoLCD_B	.equ	$CA2B
+autoLCD_C	.equ	$CA2C
+autoLCD_D	.equ	$CA2D
+intSpacing	.equ	$CA2E		; How often the audio interupts fire
+
+
+cur_column	.equ	$CA32		; Current column in screen draw
+audDecHiCount	.equ	$CA33	; Used during audio decompression
+
+
+
+imgA		.equ	$E000
+imgB		.equ	$E600
+imgC		.equ	$EC00
+greyMask	.equ	$F300
+
+intTableA	.equ	$F400		; Normal Interrupt Table
+intTableB	.equ	$F600		; Interrupt Table when outputing greyscale image
+intTableA_hi .equ	$F4
+intTableB_hi .equ	$F6
+
+silence		.equ	$F800
+audA		.equ	$FA00
+audB		.equ	$FC00
+
+
+
+pageType	.equ	$8000		; bit0 set = first page, bit1 set = last page
+pageNum		.equ	$8001
+lastFrame	.equ	$8002
+firstFrame_const	.equ	$8004
+
+
+
+
+
+
+; App information header
+	.db $80,$0F, 0,0,0,0	; This is the master field, $800
+	.db $80,$12, $01,$04	; signing key ID. This is $01,$05 for the 84+CSE
+	.db $80,$48, "v       "	; last nibble is the length
+	.db $80,$81, 1			; num pages
+	.db $80,$90				; disable splash
+	.db $03,$22,$09,$00		; null date stamp
+	.db $02,$00				; null date stamp signature
+	.db $80,$70				; final field
+	
+	;jp startApp
+	
+	
+	
+startApp:
+
+
+; Startup code {
+	
+	
+	; Delay until enter is released (useful for debugging)
+	ld a, $FD
+	out ($01), a
+startup_waitForEnter:
+	ex (sp), hl
+	ex (sp), hl
+	djnz startup_waitForEnter
+	in a, ($01)
+	and %00000001
+	jr z, startup_waitForEnter
+	
+	
+	; Before taking control of the calculator, ask Ti-OS to give us the location of our save data
+	
+	; Load file name
+	ld hl, save_name
+	b_call(_Mov9ToOP1)
+	; Search for variable
+	b_call(_ChkFindSym)
+	jr nc, save_found
+	
+	; Variable does not exist, create it with default values
+	ld hl, $0008
+	ld bc, hl
+	b_call(_CreateAppVar)	; de will point to data
+	inc de \ inc de
+	ld hl, save_defaultValues
+	push de
+	ldir
+	pop de
+	;ld b, 0				; will be created in ram (b already set to zero)
+	jr save_save
+	
+save_found:
+	inc de \ inc de
+save_save:
+	; Save save location
+	ld (savePage_raw-1), bc
+	ld (saveLoc_raw), de
+	
+	
+	; Setup memory map
+	di
+	ld a, $83
+	out ($05), a
+	
+	; Save stack pointer
+	ld (spSave_os), sp
+	
+	; Save & disable automatic LCD delay settings
+	ld bc, $0429
+	ld hl, autoLCD_A
+autoLCD_save_loop:
+	in a, (c)
+	ld (hl), a \ inc hl
+	ld a, $0C		; Minimum delay to keep the LCD responding
+	out (c), a
+	inc c
+	djnz autoLCD_save_loop
+	
+	; Setup the greyscale mask
+	ld hl, greyMask
+	ld de, hl
+	ld (hl), %11011011	\	inc hl
+	ld (hl), %01101101	\	inc hl
+	ld (hl), %10110110	\	inc hl
+	ex de, hl
+	ld bc, $0100
+	ldir
+	
+	; Setup interrupt table & mode
+	im 2
+	ld hl, intTableB
+	ld (hl), intPosB
+	ld de, intTableB+1
+	ld b, $01			; ld bc, $0100:	c already zero
+	ldir
+	ld hl, intTableA
+	ld a, h
+	ld i, a
+	ld (hl), intPosA
+	ld de, intTableA+1
+	ld b, $01			; ld bc, $0100:	c already zero
+	ld a, b				; For next
+	ldir
+	
+	; Setup interrupt mask
+	;ld a, %00000001	; a already 1
+	out ($03), a
+	; Disable timers 1 & 3
+	xor a
+	out ($30), a
+	out ($36), a
+	
+	; Fill silence
+	ld de, silence+1
+	ld hl, silence
+	ld (hl), a
+	ld bc, 520
+	ldir
+	
+	; Set LCD direction
+	ld a, $05
+	out ($10), a
+	
+	; Correct save location & copy save data
+	ld hl, (saveLoc_raw)
+	ld a, (savePage_raw)
+	or a
+	jr nz, correctSaveLoc_mod
+	; Located in ram, figure out ram page we mean
+	ld a, h
+	cp $C0
+	ld a, $81
+	jr c, correctSaveLoc_ram_8000
+	; In C000-FFFF range on page 80
+	dec a				;ld a, $80
+	;jr correctSaveLoc_mod
+correctSaveLoc_ram_8000:
+	; In 8000-BFFF range on page 81
+	;ld a, $81
+correctSaveLoc_mod:
+	; Save page & mod address to 8000-BFFF range
+	ld (savePage), a
+	set 7, h
+	res 6, h
+	; Offset location if located in rom (right now it points to the VAT entry in rom)
+	cp $80
+	jr nc, correctSaveLoc_notRom
+	ld de, 16
+	add hl, de
+correctSaveLoc_notRom:
+	ld (saveLoc), hl
+	; Copy data
+	out ($07), a
+	ld e, (hl)
+	inc hl
+	ld d, (hl)
+	ex de, hl
+	call in_range_all
+	ld (sav_refr), hl
+	
+	
+	
+	; Calculate processor speed
+	; Copy timing loop into ram
+	ld hl, testSpeed_rom
+	ld de, testSpeed_ram
+	ld bc, $0080
+	ldir
+	
+	; Setup timer 3 to fire after 1/32 of a second
+	ld a, $45
+	out ($36), a
+	ld a, %00000010
+	out ($37), a
+	
+	; Get speed of settings 0-3 and keep track of the fastest one
+	ld bc, $0000	; c - fastest speed, b - fastest setting
+	ld d, $04		; current setting being tested
+testSpeed_settingLoop:
+	dec d
+	ld a, d
+	out ($20), a
+	push de
+	push bc
+	call testSpeed
+	pop bc
+	pop de
+	; Check if faster
+	ld a, l
+	cp c
+	jr c, testSpeed_notFaster
+	ld b, d
+	ld c, l
+testSpeed_notFaster:
+	; Loop
+	xor a
+	or d
+	jr nz, testSpeed_settingLoop
+	
+	; Set cpu to the provided fastest speed
+	ld a, b
+	out ($20), a
+	
+	; Check if is fast enough (14.6 Hz is the lowest allowed speed)
+	ld a, c
+	ld (calcSpeed), a
+	cp 146
+	jr nc, testSpeed_noError
+	
+testSpeed_noError:
+	
+	
+	
+	; Calculate audio interrupt spacing
+	ld a, (calcSpeed)
+	ld de, $0138
+	; Multiply a and de (res in ahl) (https://wikiti.brandonw.net/index.php?title=Z80_Routines:Math:Multiplication)
+	ld c, 0
+	ld h, c
+	ld l, h
+	add a, a		; optimised 1st iteration
+	jr nc, $+4
+	ld h, d
+	ld l, e
+	ld b, 7
+mult_loop:
+	add hl, hl
+	rla
+	jr nc, $+4
+	add hl, de
+	adc a, c		; yes this is actually adc a, 0 but since c is free we set it to zero and so we can save 1 byte and up to 3 T-states per iteration
+	djnz mult_loop
+	
+	ld l, h
+	ld h, a
+	ld (intSpacing), hl
+	
+	
+	jr setupDisplay
+	
+	
+; }
+
+
+
+; Modify & Display startup screen & save data {
+	
+bail_modifySettings:
+	
+	; Stop Everyting!!!!
+	di
+	push af			; Save state of arrow keys
+	call disable_clocks
+	pop af
+	
+	; Modify settings
+	ld hl, (sav_refr)		; l: sav_refr, h: sav_contr
+	rrca
+	jr nc, modify_noDown
+	dec l
+modify_noDown:
+	rrca
+	jr nc, modify_noLeft
+	dec h
+modify_noLeft:
+	rrca
+	jr nc, modify_noRight
+	inc h
+modify_noRight:
+	rrca
+	jr nc, modify_noUp
+	inc l
+modify_noUp:
+	; Make sure they're in range
+	call in_range_all
+	; Save back
+	ld (sav_refr), hl
+	ex de, hl
+	ld hl, (saveLoc)
+	ld a, (savePage)
+	out ($07), a
+	ld (hl), e
+	inc hl
+	ld (hl), d
+	
+	
+	
+	
+	
+	
+setupDisplay:	
+	
+	ld iy, FLAGS
+	
+	; Clear graph buffer
+	ld hl, plotSScreen
+	ld (hl), 0
+	ld de, plotSScreen+1
+	ld bc, $02FF
+	ldir
+	
+	call copy_ram_main
+	
+	
+	; Decompress gradiant
+	ld hl, startup_grad
+	ld de, imgA
+	call dec_img
+	
+	
+	
+	; Draw arrows
+	ld hl, plotSScreen + (15*12) + 4
+	ld de, arrowSpr
+	ld bc, $0D05	; c will stay $05 throughout
+drawArrow_loop:
+	ld a, (de)	\	inc de
+	ld (hl), a	\	inc hl
+	ld a, (de)	\	inc de
+	ld (hl), a
+	push bc
+	ld b, $00		; c is still $05, bc is $0005
+	add hl, bc
+	pop bc
+	djnz drawArrow_loop
+	
+	
+	; Draw text
+	ld b, msg_list_len
+	ld hl, msg_list
+	; Setup flags
+	res textInverse, (iy + textFlags)
+	set textWrite, (iy + sGrFlags)
+	res fracDrawLFont, (iy + fontFlags)
+putMsg_loop:
+	; Get position of text
+	ld e, (hl)	\	inc hl
+	ld d, (hl)	\	inc hl
+	ld (penCol), de
+	; Draw text
+	b_call(_VPutS)
+	djnz putMsg_loop
+	
+	
+	; Draw hex digits
+	ld hl, 27 + (256*15)
+	ld a, (sav_refr)
+	call drawHex
+	ld hl, 75 + (256*15)
+	ld a, (sav_contr)
+	call drawHex
+	
+	
+	; Copy top half of Graph Buffer to Image A
+	ld hl, plotSScreen
+	ld ix, imgA
+	ld de, $0080
+	ld c, $20
+	
+grToA_loop:
+	push ix
+	ld b, $0C
+	
+grToA_rowLoop:
+	ld a, (hl)
+	inc hl
+	ld (ix), a
+	ld (ix+1), a
+	add ix, de
+	djnz grToA_rowLoop
+	
+	pop ix
+	inc ix
+	inc ix
+	dec c
+	jr nz, grToA_loop
+	
+	
+	; Draw up arrow pointing to audio port
+	;ld hl, upArrowSpr
+	;ld de, imgA+(2*65)
+	;ld b, $05
+;drawUpArrow_loop:
+	;ld a, (hl) \ inc hl
+	;ld (de), a \ inc de
+	;ld (de), a \ inc de
+	;djnz drawUpArrow_loop
+	
+	
+; }
+
+
+
+; Setup main video loop {
+	
+	
+	; Save stack pointer
+	ld (spSave_opt), sp
+	
+	; Set contrast
+	ld a, (sav_contr)
+	add a, $D8
+	out ($10), a
+	
+	; Setup variables
+	ld de, copy_to_def
+	ld hl, def_vid_vars
+	ld bc, $0010
+	ldir
+	
+	; Set LCD Position
+	ld a, $80
+	out ($10), a
+	
+	; If save data is archived then data cannot be directly modified, so that's our queue to not display the options menu
+	ld a, (savePage)
+	cp $80
+	jr c, setupVidLoop_skipOpt
+	xor a
+	ld (inVid), a
+	ld (audEn), a
+setupVidLoop_skipOpt:
+	
+	
+	
+	; Copy main ram code
+	ld hl, normInt_rom
+	ld de, normInt_ram
+	ld bc, $0600
+	ldir
+	
+	
+	; Setup crystal timers
+	; Crystal timers 1 & 2 will be set at the same rate and alternate between each other,
+	;	with equal spacing between them
+	; To get the positions of them correct, setup timer 3 to start the other timers
+	
+	; Copy timer setup code
+	ld hl, setupCrystal_rom
+	ld de, setupCrystal_ram
+	ld b, $01
+	ldir
+	; Point interrupts to setup code
+	ld a, intTableB_hi
+	ld i, a
+	
+	; Initial setup for timers 1 & 2
+	ld a, $84
+	out ($30), a
+	out ($33), a
+	ld a, $03
+	out ($31), a
+	out ($34), a
+	; Setup register
+	ld b, 2
+	; Setup timer 3
+	ld a, $82
+	out ($36), a
+	ld a, $03
+	out ($37), a
+	ld a, (intSpacing)
+	out ($38), a
+	; Enable interrupts & wait until timers are set up
+	ei
+setupCrystal_loop:
+	jr setupCrystal_loop
+	
+setupCrystal_done:
+	; Done!
+	di
+	; Point interrupts at non-greyscale audio output
+	ld a, intTableA_hi
+	ld i, a
+	; Setup initial registers for audio output so it doesn't explode
+	ld hl, $0040
+	ld de, silence
+	ld c, l
+	ld b, l
+	exx
+	; Enable interrupts so countdowns don't get messed up during ldir
+	ei
+	
+	
+	; Copy greyscale interrupt code
+	ld hl, greyInt_rom
+	ld de, greyInt_ram
+	ld bc, $C2C2 - $C0C0
+	ldir
+	
+	
+	; Setup pages
+	in a, ($06)
+	dec a
+	out ($07), a
+	
+	; Setup stack so after first frame setup we return to decompression loop
+.echo $+0
+	ld hl, dec_start
+	push hl
+	
+	
+	; Setup registers
+	di
+	ld bc, $0008
+	
+	; Jump to frame setup
+	jp newFrame_n
+	
+	
+; }
+
+
+
+; Misc. Subroutines {
+	
+	
+	
+drawHex:
+	ld (penCol), hl
+	push af
+	rlca \ rlca \ rlca \ rlca
+	call drawNibble
+	pop af
+	;call drawNibble
+	;ret
+	
+drawNibble:
+	and %00001111
+	cp $0A
+	jr c, drawNibble_num
+	add a, $07
+drawNibble_num:
+	add a, $30
+	b_call(_VPutMap)
+	ret
+	
+	
+	
+in_range_all:
+	; Put l: sav_refr and h: sav_contr in range
+	ld a, h
+	ld de, $0126
+	call in_range
+	ld h, a
+	ld a, l
+	ld de, $2650
+	call in_range
+	ld l, a
+	ret
+	
+	
+in_range:
+	; a: value to put in range
+	; d: min-value
+	; e: range
+	sub d
+	jr nc, in_range_notTooLow
+	xor a
+	jr in_range_fin
+in_range_notTooLow:
+	cp e
+	jr c, in_range_fin
+	ld a, e
+in_range_fin:
+	add a, d
+	ret
+	
+	
+	
+disable_clocks:
+	xor a
+	out ($30), a
+	out ($33), a
+	out ($36), a
+	ret
+	
+	
+copy_ram_main:
+	; Copy main ram code
+	ld hl, greyInt_rom
+	ld de, greyInt_ram
+	ld bc, $C2C2 - $C0C0
+	ldir
+	ld hl, normInt_rom
+	ld de, normInt_ram
+	ld b, $06
+	ldir
+	ret
+	
+	
+	
+; }
+
+
+
+
+
+; Setup crystal timer positions {
+	
+setupCrystal_rom:
+setupCrystal_ram	.equ	$C0C0
+.org setupCrystal_ram
+	
+	
+	; Make sure 3rd timer
+	in a, ($04)			; 11
+	rlca				; 4
+	jp nc, exitApp		; 10
+	; Acknowledge crystal timer 3
+	ld a, %00000011		; 7
+	out ($37), a		; 11
+	
+	; Check which timer to setup
+	djnz setupCrystal_timer2	; 8/13	; 2
+	
+	; Delay
+	or a				; 4
+	ret c				; 5
+	; b is 0, setup timer 1 & exit
+	ld a, (intSpacing)	; 13
+	out ($32), a		; 11
+	jp setupCrystal_done	; 10
+	
+	
+setupCrystal_timer2:
+	; Delay
+	or a				; 4
+	; b is 1, setup timer 2
+	ld a, (intSpacing)	; 13
+	out ($35), a		; 11
+	
+setupCrystal_ret:
+	ei					; 4
+	ret					; 10
+	
+	
+setupCrystal_ramEnd:
+.org (setupCrystal_ramEnd - setupCrystal_ram) + setupCrystal_rom
+.echo $+0
+	
+	
+; }
+
+
+
+
+
+
+; Interrupt routine {
+	
+	
+greyInt_rom:
+greyInt_ram		.equ	$C0C0
+.org greyInt_ram
+	
+	
+; Interrupt routine w/ greyscale draws interleaved {
+	
+	
+	
+	
+int_start_g:			; 19(?) cycles to start interrupt code
+	ex af, af'			; 4		; 1
+	in a, ($04)			; 11	; 2
+	rlca				; 4		; 1
+	jr c, audG_pullHigh	; 7/12	; 2
+	rlca				; 4		; 1
+audG_pullLow_branch	.equ	$+1
+	jr c, audG_pullLow	; 7/12	; 2
+	rlca				; 4		; 1
+audG_next_branch .equ	$+1
+	jp c, audG_next		; 10	; 3
+	jp exitApp			; 10	; 3
+	
+	
+	
+; Pull audio High {
+audG_pullHigh:
+	; Pull audio high & acknowlege int
+	ld a, $03			; 7		; 2
+	out ($00), a		; 11	; 2
+	dec a				; 4		; 1
+	out ($37), a		; 11	; 2
+	
+	; Return
+	ex af, af'			; 4		; 1
+	ei					; 4		; 1
+	ret					; 10	; 1
+; }
+	
+	
+	
+; Pull audio Low w/o greyscale draw {
+audG_pullLow_noGrey:
+	
+	; Pull audio low & acknowlege int
+	ld a, $03			; 7		; 2
+	out ($34), a		; 11	; 2
+	xor a				; 4		; 1
+	out ($00), a		; 11	; 2
+	
+	; 94 cycles
+	
+	; Delay
+	inc hl				; 6*	; 1
+	
+	; Add difference to current sample and setup next pull high
+	ld a, ixh			; 8		; 2
+	add a, ixl			; 8		; 2
+	ld ixl, a			; 8		; 2
+	out ($38), a		; 11	; 2
+	
+	; 135 cycles
+	
+	; Delay
+	dec hl				; 6*	; 1
+	
+	; Set branch to normal greyscale pull low
+	ld a, audG_pullLow - audG_pullLow_branch - 1	; 7		; 2
+	ld (audG_pullLow_branch), a		; 13	; 3
+	
+	; Return
+	ex af, af'			; 4		; 1
+	ei					; 4		; 1
+	ret					; 10	; 1
+	
+; }
+	
+	
+	
+; Pull audio Low {
+audG_pullLow:
+	
+	; Pull audio low & acknowlege int
+	ld a, $03			; 7		; 2
+	out ($34), a		; 11	; 2
+	xor a				; 4		; 1
+	out ($00), a		; 11	; 2
+	
+	; 94 cycles
+	
+	; Delay, messes up hl, will correct later
+	inc hl				; 6*	; 1
+	
+	; Add difference to current sample and setup next pull high
+	ld a, ixh			; 8		; 2
+	add a, ixl			; 8		; 2
+	ld ixl, a			; 8		; 2
+	out ($38), a		; 11	; 2
+	
+	; 135 cycles
+	
+	; Allow next interrupt to occur
+	ex af, af'			; 4		; 1
+	push af				; 11	; 1
+	ei					; 4		; 1
+	
+	exx					; 4		; 1
+	
+	; Output image strip (100 cycles)
+	ld a, (iy)			; 19	; 3
+	and (hl)			; 7		; 1
+	inc hl				; 6		; 1
+	ld c, a				; 4		; 1
+	ld a, (iy)			; 19	; 3
+	cpl					; 4		; 1
+	and (hl)			; 7		; 1
+	inc hl				; 6		; 1
+	or c				; 4		; 1
+	inc iy				; 10	; 2
+	out ($11), a		; 14	; 2
+	
+	; 258 cycles
+	
+	; Correct hl from delay above
+	exx					; 4		; 1
+	dec hl				; 6		; 1
+	exx					; 4		; 1
+	
+	
+	; Check if new column {
+column_pos	.equ	$+1
+	ld a, 0				; 7		; 2
+	dec a				; 4		; 1
+	jr nz, audG_pullLow_noNewCol	; 7/12	; 2
+	
+	; Move to next column
+	ld a, (cur_column)	; 13	; 3
+	inc a				; 4		; 1
+	; Check if done with columns
+	cp $2C				; 7		; 2
+	jr z, audG_pullLow_greyDone	; 7/12	; 2
+	ld (cur_column), a	; 13	; 3
+	ld a, 11			; 7		; 2
+	ld (column_pos), a	; 13	; 3
+	
+	
+	; Move mask back
+	push de				; 11	; 1
+	ld de, -63			; 10	; 3
+	add iy, de			; 15	; 2
+	pop de				; 10	; 1
+	
+	; 400 cycles
+	
+	; Delay
+	ld a, (hl)			; 7*	; 1
+	
+	; Output next column
+	ld a, (cur_column)	; 13	; 3
+	out ($10), a		; 14	; 2
+	
+	; Return
+	exx					; 4		; 1
+	pop af				; 10	; 1
+	ret					; 10	; 1
+	
+	; 458 cycles
+	
+	
+	; Finished with greyscale {
+audG_pullLow_greyDone:
+	
+	
+	; Swap registers
+	push ix				; 15	; 2
+	pop hl				; 10	; 1
+	; Setup interrupt pointer
+	ld a, intTableA/256	; 7		; 2
+	ld i, a				; 9		; 2
+	
+	; 373 cycles
+	
+	; Setup frame counter high-byte
+	ld a, (aud_next_branch)	; 13	; 3
+	or a				; 4		; 1
+	jr z, audG_pullLow_greyDone_inFrameHi	; 7/12
+	ld a, $01			; 7		; 2
+audG_pullLow_greyDone_inFrameHi:
+	inc a				; 4		; 1
+	ld ixl, a			; 8		; 2
+	
+	; Load countdown till next greyscale draw
+	ld a, (sav_refr)	; 13	; 3
+	ld c, a				; 4		; 1
+	
+	; Return
+	exx					; 4		; 1
+	pop af				; 10	; 1
+	ei					; 4		; 1
+	ret					; 10	; 1
+	
+	; 453/455 cycles
+	
+	
+; }
+	
+audG_pullLow_noNewCol:
+	ld (column_pos), a	; 13	; 3
+	
+; }
+	
+	
+	; 308 cycles
+	
+	; Delay
+	ld a, (hl)			; 7*	; 1
+	ld a, (hl)			; 7*	; 1
+	nop					; 4*	; 1
+	ld a, (hl)			; 7*	; 1
+	
+	; Output image strip (100 cycles)
+	ld a, (iy)			; 19	; 3
+	and (hl)			; 7		; 1
+	inc hl				; 6		; 1
+	ld c, a				; 4		; 1
+	ld a, (iy)			; 19	; 3
+	cpl					; 4		; 1
+	and (hl)			; 7		; 1
+	inc hl				; 6		; 1
+	or c				; 4		; 1
+	inc iy				; 10	; 2
+	out ($11), a		; 14	; 2
+	
+	; Delay
+	ld c, 2				; 7*	; 2
+audG_pullLow_delayLoop:
+	dec c				; 4*	; 1
+	jr nz, audG_pullLow_delayLoop	; 7/12*	; 2
+	ld a, (hl)			; 7*	; 1
+	
+	
+	; Output image strip (104 cycles)
+	ld a, (iy)			; 19	; 3
+	and (hl)			; 7		; 1
+	inc hl				; 6		; 1
+	ld c, a				; 4		; 1
+	ld a, (iy)			; 19	; 3
+	cpl					; 4		; 1
+	and (hl)			; 7		; 1
+	inc hl				; 6		; 1
+	or c				; 4		; 1
+	inc iy				; 10	; 2
+	exx					; 4		; 1
+	out ($11), a		; 14	; 2
+	
+	
+	; 608 cycles
+	
+	; Return
+	pop af				; 10	; 1
+	ret					; 10	; 1
+	
+	; 628 cycles
+	
+	
+	
+; }
+	
+	
+	
+; Pull audio Low & Get Next Sample {
+audG_next:
+	
+	
+	exx					; 4		; 1
+	; Pull audio low
+	xor a				; 4		; 1
+	ret c				; 5*	; 1
+	out ($00), a		; 11	; 2
+	
+	; 94 cycles
+	
+	; Delay, messes up hl, will correct later
+	inc hl				; 6*	; 1
+	
+	; Add difference to current sample and setup next pull high
+	ld a, ixh			; 8		; 2
+	add a, ixl			; 8		; 2
+	ld ixl, a			; 8		; 2
+	out ($38), a		; 11	; 2
+	
+	; 135 cycles
+	
+	; Acknowlege interrupt
+	ld a, $03			; 7		; 2
+	out ($31), a		; 11	; 2
+	
+	; Allow next interrupt to occur
+	ex af, af'			; 4		; 1
+	push af				; 11	; 1
+	ei					; 4		; 1
+	
+	; 172 cycles
+	
+	; Output image strip
+	ld a, (iy)			; 19	; 3
+	cpl					; 4		; 1
+	and (hl)			; 7		; 1
+	dec hl				; 6		; 1
+	ld c, a				; 4		; 1
+	ld a, (iy)			; 19	; 3
+	and (hl)			; 7		; 1
+	or c				; 4		; 1
+	out ($11), a		; 14	; 2
+	
+	; 256 cycles
+	
+	inc iy				; 10	; 2
+	inc hl				; 6		; 1
+	inc hl				; 6		; 1
+	
+	; 278 cycles
+	
+	
+	
+	; Check if new frame {
+	djnz audG_next_noNewFrame_wait	; 8/13	; 2
+	
+	; This branch will alternate between sending us to next frame setup and not doing that
+aud_next_branch	.equ	$+1
+	jr audG_next_branch_no	; 12	; 2
+	
+	; Reconstruct branch
+	ld a, audG_next_branch_no - aud_next_branch - 1		; 7		; 2
+	ld (aud_next_branch), a	; 13	; 3
+	
+	
+	; Redirect next pull low so no greyscale draw occurs
+	ld a, audG_pullLow_noGrey - audG_pullLow_branch - 1	; 7		; 2
+	ld (audG_pullLow_branch), a		; 13	; 3
+	
+	; Redirect next next so only two greyscale draw occurs
+	exx					; 4		; 1
+	pop af				; 10	; 1
+	push hl				; 11	; 1
+	ld hl, audG_next_twoGrey	; 10
+	ld (audG_next_branch), hl	; 16
+	
+	jp newFrame_g		; 10	; 3
+	
+audG_next_noNewFrame_wait:
+	; Delay
+	inc hl					; 6*	; 1
+	dec hl					; 6*	; 1
+	jr audG_next_noNewFrame	; 12	; 2
+	
+	
+audG_next_branch_no:
+	; Next time!
+	xor a					; 4		; 1
+	ld (aud_next_branch), a	; 13	; 3
+	
+audG_next_noNewFrame:
+	
+; }
+	
+audG_next_noNewCol:
+	
+	
+	
+	; 315 cycles
+	
+	
+	; Delay
+	nop					; 4*	; 1
+	nop					; 4*	; 1
+	nop					; 4*	; 1
+	nop					; 4*	; 1
+	
+	; Output image strip (100 cycles)
+	ld a, (iy)			; 19	; 3
+	and (hl)			; 7		; 1
+	inc hl				; 6		; 1
+	ld c, a				; 4		; 1
+	ld a, (iy)			; 19	; 3
+	cpl					; 4		; 1
+	and (hl)			; 7		; 1
+	inc hl				; 6		; 1
+	or c				; 4		; 1
+	inc iy				; 10	; 2
+	out ($11), a		; 14	; 2
+	
+	; 431 cycles
+	
+	; Get next sample
+	ld a, (de)			; 7		; 1
+	inc de				; 6		; 1
+	ld ixh, a			; 8		; 2
+	
+	; Delay
+	push hl				; 11*	; 1
+	push de				; 11*	; 1
+	pop hl				; 10*	; 1
+	pop hl				; 10*	; 1
+	inc a				; 4*	; 1
+	dec a				; 4*	; 1
+	
+	; Output image strip (104 cycles)
+	ld a, (iy)			; 19	; 3
+	and (hl)			; 7		; 1
+	inc hl				; 6		; 1
+	ld c, a				; 4		; 1
+	ld a, (iy)			; 19	; 3
+	cpl					; 4		; 1
+	and (hl)			; 7		; 1
+	inc hl				; 6		; 1
+	or c				; 4		; 1
+	inc iy				; 10	; 2
+	exx					; 4		; 1
+	out ($11), a		; 14	; 2
+	
+	
+	; Return
+	pop af				; 10	; 1
+	ret					; 10	; 1
+	
+	; 626 cycles
+	
+	
+	
+; }
+	
+	
+	
+; Pull audio Low & Get next Sample w/ only two greyscale draws {
+	
+audG_next_twoGrey:
+	
+	exx					; 4		; 1
+	; Pull audio low
+	xor a				; 4		; 1
+	ret c				; 5*	; 1
+	out ($00), a		; 11	; 2
+	
+	; 94 cycles
+	
+	; Delay
+	inc hl				; 6*	; 1
+	
+	; Add difference to current sample and setup next pull high
+	ld a, ixh			; 8		; 2
+	add a, ixl			; 8		; 2
+	ld ixl, a			; 8		; 2
+	out ($38), a		; 11	; 2
+	
+	; 135 cycles
+	
+	; Acknowlege interrupt
+	ld a, $03			; 7		; 2
+	out ($31), a		; 11	; 2
+	
+	; Allow next interrupt to occur
+	ex af, af'			; 4		; 1
+	push af				; 11	; 1
+	ei					; 4		; 1
+	
+	; 172 cycles
+	
+	; Output image strip
+	ld a, (iy)			; 19	; 3
+	cpl					; 4		; 1
+	and (hl)			; 7		; 1
+	dec hl				; 6		; 1
+	ld c, a				; 4		; 1
+	ld a, (iy)			; 19	; 3
+	and (hl)			; 7		; 1
+	or c				; 4		; 1
+	out ($11), a		; 14	; 2
+	
+	; 256 cycles
+	
+	inc iy				; 10	; 2
+	inc hl				; 6		; 1
+	inc hl				; 6		; 1
+	
+	; 278 cycles
+	
+	dec b				; 4		; 1
+	
+	; Correct branch
+	push hl				; 11	; 1
+	ld hl, audG_next	; 10	; 1
+	ld (audG_next_branch), hl	; 16	; 3
+	pop hl				; 10	; 1
+	
+	; Output image strip (100* cycles)
+	ld a, (iy)			; 19	; 3
+	and (hl)			; 7		; 1
+	inc hl				; 6		; 1
+	ld c, a				; 4		; 1
+	ld a, (iy)			; 19	; 3
+	cpl					; 4		; 1
+	and (hl)			; 7		; 1
+	inc hl				; 6		; 1
+	or c				; 4		; 1
+	inc iy				; 10	; 1
+	exx					; 4		; 1
+	out ($11), a		; 14	; 2
+	
+	; 433 cycles
+	
+	; Return
+	pop af				; 10	; 1
+	ret					; 10	; 1
+	
+	; 453 cycles
+	
+; }
+	
+	
+	
+	
+; }
+	
+	
+greyInt_ram_end:
+.org (greyInt_ram_end - greyInt_ram) + greyInt_rom
+	
+	
+normInt_rom:
+normInt_ram		.equ	$C2C2
+.org normInt_ram
+	
+	
+; Interrupt routine w/o greyscale draws {
+	
+	
+int_start_n:			; 19(?) cycles to start interrupt code
+	ex af, af'			; 4		; 1
+	in a, ($04)			; 11	; 2
+	rlca				; 4		; 1
+	jr c, audN_pullHigh	; 7/12	; 2
+	rlca				; 4		; 1
+	jr c, audN_pullLow	; 7/12	; 2
+	rlca				; 4		; 1
+	jr nc, audN_exitApp	; 7/12	; 2
+	
+	
+; Pull audio Low & get next sample {
+audN_next:
+	
+	exx					; 4		; 1
+	
+	; Delay
+	inc a				; 4*	; 1
+	dec a				; 4*	; 1
+	
+	; Pull audio low & acknowlege int
+	xor a				; 4		; 1
+	out ($00), a		; 11	; 2
+	
+	; 94 cycles
+	
+	ld a, $03			; 7		; 2
+	out ($31), a		; 11	; 2
+	
+	; 112 cycles
+	
+	; Add difference to current sample and setup next pull high
+	ld a, h				; 4		; 1
+	add a, l			; 4		; 1
+	ld l, a				; 4		; 1
+	out ($38), a		; 11	; 2
+	
+	; 135 cycles
+	
+	; Load next sample difference
+	ld a, (de)			; 7		; 1
+	inc de				; 6		; 1
+	ld h, a				; 4		; 1
+	
+	; Check if done with frame
+	djnz audN_next_noNewFrame	; 8/13	; 2
+	dec ixl				; 8		; 2
+	jp z, newFrame_n	; 10	; 3
+audN_next_noNewFrame:
+	
+	; Return
+	exx					; 4		; 1
+	ex af, af'			; 4		; 1
+	ei					; 4		; 1
+	ret					; 10	; 1
+	
+; }
+	
+	
+	
+; Pull audio Low {
+audN_pullLow:
+	; Pull audio low & acknowlege int
+	ld a, $03			; 7		; 2
+	out ($34), a		; 11	; 2
+	xor a				; 4		; 1
+	out ($00), a		; 11	; 2
+	
+	; 94 cycles
+	
+	exx					; 4		; 1
+	; Delay for consistant timing
+	ld a, (hl)			; 7*	; 1
+	ld a, (hl)			; 7*	; 1
+	
+	; Add difference to current sample and setup next pull high
+	ld a, h				; 4		; 1
+	add a, l			; 4		; 1
+	ld l, a				; 4		; 1
+	out ($38), a		; 11	; 2
+	
+	; 135 cycles
+	
+	; Check if start greyscale draw
+	dec c				; 4		; 1
+	jr z, audN_beginGreyscale	; 7/12	; 2
+	
+audN_pullLow_noGreyscale:
+	
+	; Return
+	exx					; 4		; 1
+	ex af, af'			; 4		; 1
+	ei					; 4		; 1
+	ret					; 10	; 1
+	
+	
+; }
+	
+	
+audN_exitApp:
+	jp exitApp
+	
+	
+; Pull audio High {
+audN_pullHigh:
+	; Pull audio high & acknowlege int
+	ld a, $03			; 7		; 2
+	out ($00), a		; 11	; 2
+	dec a				; 4		; 1
+	out ($37), a		; 11	; 2
+	
+	; Return
+	ex af, af'			; 4		; 1
+	ei					; 4		; 1
+	ret					; 10	; 1
+; }
+	
+	
+	
+; Begin greyscale draw {
+audN_beginGreyscale:
+	; Setup frame branch
+	ld a, ixl			; 8		; 2
+	dec a				; 4		; 1
+	jr z, audN_setupBranch_put	; 7/12	; 2
+	ld a, audG_next_branch_no - aud_next_branch - 1	; 7		; 2
+audN_setupBranch_put:
+	ld (aud_next_branch), a	; 13	; 3
+	
+	; Swap registers
+	push hl				; 11	; 1
+	pop ix				; 14	; 2
+	; Setup first column
+	ld a, $20			; 7		; 2
+	out ($10), a		; 11	; 2
+	ld (cur_column), a	; 13	; 3
+	ld a, 11			; 7		; 2
+	ld (column_pos), a	; 13	; 3
+	
+	; Setup interrupts
+	ld a, intTableB/256	; 7		; 2
+	ld i, a				; 9		; 2
+	
+	; Setup mask pointer
+	ld hl, (greyMask_cur)	; 16	; 3
+	dec l					; 4		; 1
+	jr nz, audN_beginGrey_noMaskLoop	; 7/12	; 2
+	ld l, $03				; 7		; 2
+audN_beginGrey_noMaskLoop:
+	ld (greyMask_cur), hl	; 16	; 3
+	ld iy, (greyMask_cur)	; 20
+	
+	; Setup image pointer
+	ld hl, (greyImgBuff)	; 16	; 3
+	
+	; Return
+	ex af, af'			; 4		; 1
+	exx					; 4		; 1
+	ei					; 4		; 1
+	ret					; 10	; 1
+	
+	
+; }
+	
+	
+	
+; }
+	
+	
+	
+; }
+
+
+
+; Next Frame {
+
+
+; Options Menu New Frame {
+	
+	
+frameEnd_optMenu_noEnter:
+	; Read arrow keys
+	ld a, $FF			; 7		; 2
+	out ($01), a		; 11	; 2
+	ld a, $FE			; 7		; 2
+	out ($01), a		; 11	; 2
+	ld a, (prevArrow)	; 13	; 3
+	ld b, a				; 4		; 1
+	push hl				; 11*	; 1
+	pop hl				; 10*	; 1
+	in a, ($01)			; 11	; 2
+	ld (prevArrow), a	; 13	; 3
+	cpl					; 4		; 1
+	and b				; 4		; 1
+	; If any arrow keys are pressed then bail from this loop and go to modify settings and setup things again
+	jp nz, bail_modifySettings	; 10	; 3
+	; Skip to after seting up next frame
+	jp frameEnd_setupAudRegs	; 10	; 3
+	
+	
+	
+frameEnd_optMenu_Enter:
+	; Enter pressed, start actual video playback
+	; Set pointer to start of this page
+	ld hl, firstFrame_const	; 10	; 3
+	ld (frameList_cur), hl	; 16	; 3
+	; Mark in actual video
+	ld a, $01			; 7		; 2
+	ld (inVid), a		; 13	; 3
+	ld (audEn), a		; 13	; 3
+	; Go to seting up first frame
+	jp frameEnd_setupFrame_noLoadPtr	; 10	; 3
+	
+	
+; }
+
+; New Frame {
+	
+	
+newFrame_n:
+	
+	; Setup audio sample counter (b is already 0)
+	ld ixl, $02			; 8		; 2
+	
+	; Exchange out audio registers
+	ex af, af'			; 4		; 1
+	exx					; 4		; 1
+	ei					; 4		; 1
+	
+	push hl				; 11	; 1
+	
+newFrame_g:
+	
+	; Save decomp registers
+	push de				; 11	; 1
+	push bc				; 11	; 1
+	push af				; 11	; 1
+	
+	
+	; Read Enter key & check if pressed
+	ld a, $FD			; 7		; 2
+	out ($01), a		; 11	; 2
+	ld a, (prevEnter)	; 13	; 3
+	ld b, a				; 4		; 1
+	in a, ($01)			; 11	; 2
+	or $FE				; 7		; 2
+	ld (prevEnter), a	; 13	; 3
+	cpl					; 4		; 1
+	and b				; 4		; 1
+	jr nz, frameEnd_enterPressed	; 7/12	; 2
+	
+	
+	; Enter was not pressed, check if in options menu
+	ld a, (inVid)		; 13	; 3
+	or a				; 4		; 1
+	jr z, frameEnd_optMenu_noEnter	; 7/12	; 2
+	
+	; Enter was not pressed, check if paused
+	ld a, (isPaused)	; 13	; 3
+	or a				; 4		; 1
+	jr z, frameEnd_nextFrame	; 7/12	; 2
+	
+	
+	; Enter not pressed and we are paused, read arrow keys & check if pressed
+	ld a, $FF			; 7		; 2
+	out ($01), a		; 11	; 2
+	ld a, $FE			; 7		; 2
+	out ($01), a		; 11	; 2
+	ld a, (prevArrow)	; 13	; 3
+	ld b, a				; 4		; 1
+	push hl				; 11*	; 1
+	pop hl				; 10*	; 1
+	in a, ($01)			; 11	; 2
+	ld (prevArrow), a	; 13	; 3
+	cpl					; 4		; 1
+	and b				; 4		; 1
+	
+	jr z, frameEnd_setupFrame	; 7/12	; 2
+	
+	; Setup return address for next section
+	ld hl, frameEnd_setupFrame	; 16	; 3
+	push hl				; 11	; 1
+	; Change fremes based on arrow key pressed (only handles one)
+	rrca				; 4		; 1
+	jp c, frameList_nextPage	; 10	; 3
+	rrca				; 4		; 1
+	jp c, frameList_prev		; 10	; 3
+	rrca				; 4		; 1
+	jp c, frameList_next		; 10	; 3
+	;rrca				; 4		; 1
+	;jp c, frameList_prevPage	; 10	; 3
+	;ret					; 10	; 1
+	jp frameList_prevPage		; 10	; 3
+	
+	
+	
+frameEnd_enterPressed:
+	; Error was pressed, check if in options menu
+	ld a, (inVid)		; 13	; 3
+	or a				; 4		; 1
+	jr z, frameEnd_optMenu_Enter	; 7/12	; 2
+	
+	; Enter was pressed, check if paused
+	ld a, (isPaused)	; 13	; 3
+	or a				; 4		; 1
+	jr nz, frameEnd_unpause	; 7/12	; 2
+	
+	; We were unpaused but enter was pressed, pause
+	ld (audEn), a		; 13	; 3
+	inc a				; 4		; 1
+	ld (isPaused), a	; 13	; 3
+	
+	jr frameEnd_setupFrame	; 12	; 2
+	
+	
+	
+frameEnd_unpause:
+	; We were paused but enter was pressed, unpause
+	xor a				; 4		; 1
+	ld (isPaused), a	; 13	; 3
+	inc a				; 4		; 1
+	ld (audEn), a		; 13	; 3
+	
+frameEnd_nextFrame:
+	; Move to next frame
+	call frameList_next	; 17	; 3
+	
+	
+	
+	
+	
+frameEnd_setupFrame:
+	
+	; Load frame list pointer
+	ld hl, (frameList_cur)	; 16	; 3
+	
+frameEnd_setupFrame_noLoadPtr:
+	
+	; Load compressed image pointer
+	ld e, (hl) \ inc hl	; 13	; 2
+	ld d, (hl) \ inc hl	; 13	; 2
+	ld (compImgStart), de	; 20	; 3
+	
+	; Load compressed audio pointer
+	ld e, (hl) \ inc hl	; 13	; 2
+	ld d, (hl)			; 7		; 1
+	ld (compAudStart), de	; 20	; 3
+	
+	
+	; Check if decompression is finished
+	ld a, (decState)	; 13	; 3
+	dec a				; 4		; 1
+	jr nz, err_decNotFinished	; 7/12	; 2
+	; Set decompression state to ready (a=0)
+	ld (decState), a	; 13	; 3
+	
+	
+	
+	; Point greyscale image pointer at the frame just decompressed
+	ld hl, (curImgBuff)	; 16	; 3
+	ld (greyImgBuff), hl ; 16	; 3
+	
+	; Move decompressed image pointer to the next image buffer
+	ld a, $06			; 7		; 2
+	add a, h			; 4		; 1
+	cp $F0				; 7		; 2		; Check if greater than $F0
+	jr c, frameEnd_putDecPtr	; 7/12	; 2
+	; Move to first buffer
+	ld a, $E0			; 7		; 2
+frameEnd_putDecPtr:
+	; Save image pointer
+	ld h, a				; 4		; 1
+	ld (curImgBuff), hl	; 16	; 3
+	
+	
+frameEnd_setupAudRegs:
+	
+	; Setup audio playback registers
+	di					; 4		; 1
+	exx					; 4		; 1
+	
+	; Check if in middle of greyscale draw
+	ld a, i				; 9		; 2
+	cp intTableB/256	; 7		; 2
+	jr z, audReg_inGrey	; 7/12	; 2
+	ld a, (startSamp)	; 13	; 3
+	ld l, a				; 4		; 1
+	ld h, $00			; 7		; 2
+	jr audReg_sampDone	; 12	; 2
+audReg_inGrey:
+	ld a, (startSamp)	; 13	; 3
+	ld ixl, a			; 8		; 2
+	ld ixh, 0			; 11	; 3
+audReg_sampDone:
+	
+	; Check if audio is enabled
+	ld a, (audEn)		; 13	; 3
+	or a				; 4		; 1
+	jr nz, audReg_audOn	; 7/12	; 2
+	ld de, silence		; 10	; 3
+	jr audReg_audDone	; 12	; 2
+audReg_audOn:
+	ld de, (curAudBuff)	; 20	; 4
+audReg_audDone:
+	
+	exx					; 4		; 1
+	ei					; 4		; 1
+	
+	
+	; Swap buffer audio data is decompressed into
+	ld hl, curAudBuff+1	; 10	; 3
+	ld a, (hl)			; 7		; 1
+	xor (audA^audB)/256	; 7		; 2
+	ld (hl), a			; 7		; 1
+	
+	
+frameEnd_afterSetup:
+	; Discharge keypad
+	ld a, $FF			; 7		; 2
+	out ($01), a		; 11	; 2
+	
+	
+	; Return 
+	pop af				; 10	; 1
+	pop bc				; 10	; 1
+	pop de				; 10	; 1
+	pop hl				; 10	; 1
+	ret					; 10	; 1
+	
+	
+	
+	
+err_decNotFinished:
+	; Unimplimented
+	rst 00h
+	
+	
+; }
+
+; Frame List Traversal {
+	
+	
+frameList_next:
+	; Move down frame list to next frame
+	ld hl, (frameList_cur)	; 16	; 3
+	ld de, $0004		; 10	; 3
+	add hl, de			; 11	; 1
+	
+	; Check if moving to next page
+	; Load pointer to last frame
+	ld de, (lastFrame)	; 20	; 4
+	; Check if current frame pointer is greater than last frame pointer
+	inc de				; 6		; 1
+	push hl				; 11	; 1
+	or a				; 4		; 1
+	sbc hl, de			; 15	; 2
+	pop hl				; 10	; 1
+	jr nc, frameList_nextPage	; 7/12	; 2
+	
+	; Reset wind-down counter
+	ld a, winddown_default	; 7	; 2
+	ld (winddown), a		; 13	; 3
+	
+	ld (frameList_cur), hl	; 16	; 3
+	ret						; 10	; 1
+	
+	
+	
+frameList_nextPage:
+	; Check if this was the last page
+	ld a, (pageType)	; 13	; 3
+	bit 1, a			; 8		; 2
+	jr z, frameList_nextPage_noEnd	; 7/12	; 2
+	
+	; Finished, winddown
+	ld hl, winddown		; 10	; 3
+	dec (hl)			; 11	; 1
+	jp z, exitApp		; 7/12	; 2		; Act as if ON was pressed at the end
+	
+	; Still winding down, just repeat frame & mute audio
+	xor a				; 4		; 1
+	ld (audEn), a		; 13	; 3
+	ret					; 10	; 1
+	
+frameList_nextPage_noEnd:
+	; Move to next page
+	in a, ($07)			; 11	; 2
+	dec a				; 4		; 1
+	out ($07), a		; 11	; 2
+	
+	; Set pointer to start of this page
+	ld hl, firstFrame_const	; 10	; 3
+	ld (frameList_cur), hl	; 16	; 3
+	ret						; 10	; 1
+	
+	
+	
+frameList_prev:
+	; Move up frame list to previous frame
+	ld hl, (frameList_cur)	; 16	; 3
+	ld de, -4			; 10	; 3
+	add hl, de			; 11	; 1
+	
+	; Check if moving to previous page
+	; Load pointer to first frame
+	ld de, firstFrame_const	; 10	; 4
+	; Check if current frame pointer is less than first frame pointer
+	push hl				; 11	; 1
+	or a				; 4		; 1
+	sbc hl, de			; 15	; 2
+	pop hl				; 10	; 1
+	jr c, frameList_prev_prevPage	; 7/12	; 2
+	
+	ld (frameList_cur), hl	; 16	; 3
+	ret					; 10	; 1
+	
+frameList_prev_prevPage:
+	; Check if this is the first page
+	ld a, (pageType)	; 13	; 3
+	bit 0, a			; 8		; 2
+	ret nz				; 5/11	; 1
+	; Go back a page
+	in a, ($07)			; 11	; 2
+	inc a				; 4		; 1
+	out ($07), a		; 11	; 2
+	; Load the last frame
+	ld hl, (lastFrame)		; 16	; 3
+	ld (frameList_cur), hl	; 16	; 3
+	ret						; 10	; 1
+	
+	
+	
+frameList_prevPage:
+	; Check if first frame
+	ld hl, (frameList_cur)	; 16	; 3
+	ld de, firstFrame_const	; 10	; 3
+	ld a, h				; 4		; 1
+	xor d				; 4		; 1
+	ld b, a				; 4		; 1
+	ld a, l				; 4		; 1
+	xor e				; 4		; 1
+	or b				; 4		; 1
+	jr z, frameList_prevPage_yes	; 7/12	; 2
+	
+	; Not on first frame, just go to first frame
+	jr frameList_prevPage_done	; 12	; 2
+	
+frameList_prevPage_yes:
+	; Yes, we are on the first frame and yes, we do want to go to the previous page
+	; Check if this is the first page
+	ld a, (pageType)	; 13	; 3
+	bit 0, a			; 8		; 2
+	jr z, frameList_prevPage_justDoItAlready	; 7/12	; 3
+	
+	; First page, can't go any furthur back. Sorry, Thank's for playing! Try again next week!
+	jr frameList_prevPage_done	; 12	; 2
+	
+frameList_prevPage_justDoItAlready:
+	; Yes! Finally! Go back a page!
+	; Or, I guess foreward a page, cuz they're stored backwards
+	in a, ($07)			; 11	; 2
+	inc a				; 4		; 1
+	out ($07), a		; 11	; 2
+	
+frameList_prevPage_done:
+	; Load the first frame
+	ld hl, firstFrame_const	; 10	; 3
+	ld (frameList_cur), hl	; 16	; 3
+	ret						; 10	; 1
+	
+	
+; }
+
+
+; }
+
+
+
+; Main Decompression Loop {
+	
+	
+dec_start:
+dec_loop:
+	; Main decompression loop
+	; Wait until next frame has started
+	ld hl, decState		; 10	; 3
+dec_wait_loop:
+	ld a, (hl)			; 7		; 1
+	or a				; 4		; 1
+	jr nz, dec_wait_loop ; 7/12	; 2
+	
+	; Do image decomp first
+	ld hl, (compImgStart)	; 16	; 3
+	ld de, (curImgBuff)		; 20	; 3
+	ld b, a				; 4		; 1
+	call dec_img		; 17	; 3
+	
+	; Audio decompression
+	ld hl, (compAudStart)	; 16	; 3
+	ld de, (curAudBuff)		; 20	; 3
+	; b is 0 after image decomp, a total of 512 samples will be decompressed
+	ld a, $02			; 7		; 2
+	ld (audDecHiCount), a	; 13	; 3
+	call dec_aud		; 17	; 3
+	ld a, (hl)			; 7		; 1
+	ld (startSamp), a	; 13	; 3
+	
+	; Mark decompression for this frame as finished
+	ld a, $01			; 7		; 2
+	ld (decState), a	; 13	; 3
+	
+	jr dec_loop			; 12	; 2
+	
+; }
+
+ 
+
+; Decompress Audio {
+	
+	
+dec_byte_check:
+	; Branch to nibble-wide offsets if bit 0 of previously read byte was set
+	jr c, dec_nibble	; 7/12	; 2
+dec_aud:
+dec_byte:
+	; Audio decompression starts here
+	; Load byte-wide offset
+	ld a, (hl)			; 7		; 1
+	inc hl				; 6		; 1
+	sra a				; 8		; 1
+	ld (de), a			; 7		; 1
+	inc de				; 6		; 1
+	djnz dec_byte_check		; 8/13	; 2
+	ld a, (audDecHiCount)	; 13	; 3
+	dec a				; 4		; 1
+	ret z				; 5/11	; 2
+	ld (audDecHiCount), a	; 13	; 3
+	jr dec_byte_check	; 12	; 2
+	
+dec_nibble:
+	; Load two nibble-wide offsets
+	ld a, (hl)			; 7		; 1
+	inc hl				; 6		; 1
+	ld c, a				; 4		; 1
+	; Get lower nibble
+	and %00001111		; 7		; 2
+	; Check if switch to byte-wide
+	cp $08				; 7		; 2
+	jr z, dec_byte		; 7/12	; 2
+	; Correct sign
+	jr c, dec_nibble_lower_pos	; 7/12	; 2
+	or %11110000		; 7		; 2
+dec_nibble_lower_pos:
+	; Store offset
+	ld (de), a			; 7		; 1
+	inc de				; 6		; 1
+	djnz dec_nibble_upper	; 8/13	; 2
+	ld a, (audDecHiCount)	; 13	; 3
+	dec a				; 4		; 1
+	ret z				; 5/11	; 2
+	ld (audDecHiCount), a	; 13	; 3
+	
+dec_nibble_upper:
+	; Get upper nibble
+	ld a, c				; 4		; 1
+	sra a \ sra a \ sra a \ sra a	; 32	; 8
+	; Check if switch to byte-wide
+	cp $F8				; 7		; 2
+	jr z, dec_byte		; 7/12	; 2
+	; Store offset
+	ld (de), a			; 7		; 1
+	inc de				; 6		; 1
+	djnz dec_nibble		; 8/13	; 2
+	ld a, (audDecHiCount)	; 13	; 3
+	dec a				; 4		; 1
+	ret z				; 5/11	; 2
+	ld (audDecHiCount), a	; 13	; 3
+	jr dec_nibble		; 12	; 2
+	
+	
+; }
+
+
+
+; Decompress Image {
+
+dec_img:
+dec_img_loop:
+	
+	; Load type & length byte
+	ld a, (hl)			; 7		; 1
+	inc hl				; 6		; 1
+	;Branch based on type
+	srl a				; 8		; 2
+	jr c, dec_alt		; 7/12	; 2
+	rrca				; 4		; 1
+	jr c, dec_stream	; 7/12	; 2
+	rrca				; 4		; 1
+	jr c, dec_alt_flip	; 7/12	; 2
+	; Check if done
+	ret z				; 5/11	; 1
+	
+	
+dec_lzss:
+	; LZSS
+	ld c, a				; 4		; 1
+	inc c				; 4		; 1
+	; Calculate pointer to read from
+	push de					; 11	; 1
+	ld a, (hl)				; 7		; 1
+	inc hl					; 6		; 1
+	srl a					; 8		; 2
+	jr nc, dec_lzss_single	; 7/12	; 2
+	
+	; Two-byte offset
+	ld d, a					; 4		; 1
+	ld e, (hl)				; 7		; 1
+	inc hl					; 6		; 1
+	jr dec_lzss_applyOff	; 12	; 2
+	
+dec_lzss_single:
+	; One-byte offset
+	ld e, a				; 4		; 1
+	ld d, b				; 4		; 1
+	
+dec_lzss_applyOff:
+	; Negate de
+	xor a				; 4		; 1
+	sub e				; 4		; 1
+	ld e, a				; 4		; 1
+	sbc a, a			; 4		; 1
+	sub d				; 4		; 1
+	ld d, a				; 4		; 1
+	
+	; Apply offset
+	ex (sp), hl			; 19	; 1		; comp. pointer is now in stack instead of decomp. pointer
+	ex de, hl			; 4		; 1
+	add hl, de			; 11	; 1
+	
+	; Copy data
+	ldir				; 21x-5	; 2
+	pop hl				; 10	; 1
+	jp dec_img_loop		; 10	; 3
+	
+	
+dec_stream:
+	; Data stream
+	and %00111111		; 7		; 2
+	ld c, a				; 4		; 1
+	inc c				; 4		; 1
+	ldir				; 21x-5	; 2
+	jp dec_img_loop		; 10	; 3
+	
+	
+dec_alt_flip:
+	; ALT-FLIP
+	; Alternate between byte from data stream and the same byte flipped
+	and %00011111			; 7		; 2
+	ld b, a					; 4		; 1
+	inc b					; 4		; 1
+dec_alt_flip_loop:
+	; Put data byte
+	ld a, (hl)				; 7		; 1
+	inc hl					; 6		; 1
+	ld (de), a				; 7		; 1
+	inc de					; 6		; 1
+	dec b					; 4		; 1
+	jr z, dec_alt_flip_done	; 7/12	; 2
+	; Put flipped byte
+	cpl						; 4		; 1
+	ld (de), a				; 7		; 1
+	inc de					; 6		; 1
+	djnz dec_alt_flip_loop	; 8/13	; 2
+dec_alt_flip_done:
+	jp dec_img_loop			; 10	; 3
+	
+	
+dec_alt:
+	; Alternate between byte from data stream and constant value
+	ex de, hl				; 4		; 1
+	; Check if alternating 00 or FF
+	ld c, b					; 4		; 1		; c=0
+	srl a					; 8		; 2
+	jr nc, dec_alt_00		; 7/12	; 2
+	dec c					; 4		; 1		; c=FF
+dec_alt_00:
+	
+	; Alternating stream
+	; Check if starting on data or const value
+	srl a					; 8		; 2
+	ld b, a					; 4		; 1
+	inc b					; 4		; 1
+	jr c, dec_alt_const	; 7/12	; 2
+dec_alt_loop:
+	; Data byte
+	ld a, (de)				; 7		; 1
+	inc de					; 6		; 1
+	ld (hl), a				; 7		; 1
+	inc hl					; 6		; 1
+	dec b					; 4		; 1
+	jr z, dec_alt_done		; 7/12	; 2
+dec_alt_const:
+	; Constant byte
+	ld (hl), c				; 7		; 1
+	inc hl					; 6		; 1
+	djnz dec_alt_loop	; 8/13	; 2
+dec_alt_done:
+	ex de, hl				; 4		; 1
+	jp dec_img_loop			; 10	; 3
+	
+	
+	
+; }
+
+
+
+; Messages {
+; Messages are stored here because TI-OS will swap out the normal app page when displaying text
+
+msg_list:
+msg_list_len	.equ	5
+	.db 12, 0, "INSERT  AUDIO  DEVICE", 0
+	.db 2, 8, "ADJUST  SO  IMAGE  IS  STABLE", 0
+	.db 11, 24, "PRESS  ENTER  TO  START", 0
+	.db 7, 15, "REFR=", 0
+	.db 55, 15, "CONT=", 0
+error_speed:
+	.db 8
+	.db 2, 2
+	.db "Your  calculator's  speed", 0
+	.db "has  been  determined  and", 0
+	.db "it  may  be  too  slow  to", 0
+	.db "run  this  program", 0
+	.db "correctly.", 0
+	.db 0
+	.db "Press  ENTER  to  run", 0
+	.db "anyway", 0
+error_decomp:
+	.db 2
+	.db 2, 2
+	.db "!FATAL ERROR!", 0
+	.db "Frame  Decompression  not", 0
+	.db "finished  by  start  of", 0
+	.db "next  frame",0
+error_press_on:
+	.db 1
+	.db 2, 2
+	.db "Press ON to exit", 0
+	
+
+; }
+
+normInt_ram_end:
+.org (normInt_ram_end - normInt_ram) + normInt_rom
+.echo $+0
+
+
+
+; Test Speed {
+	
+; This will be copied to the start of the RAM code area
+testSpeed_rom:
+testSpeed_ram	.equ	$C2C2
+.org testSpeed_ram
+	
+	
+testSpeed_intFired:
+	; Make sure timer 3 is what fired
+	in a, ($04)
+	rlca
+	jp nc, exitApp
+	; Acknowledge timer 3
+	ld a, %00000010
+	out ($37), a
+	
+	pop af
+	ret
+	
+	; Instructions executed in ROM sometimes take 1 extra cycle to complete,
+	;	but not always??? Code in RAM does always seem to take the correct
+	;	number of cycles, so just execute it in there.
+testSpeed:
+	ld l, $00
+	ld a, 64
+	out ($38), a
+	ei
+	; Increment l by 1 every 3,125 cycles
+testSpeed_loop:
+	ld bc, 119			; 10
+testSpeed_loop_inner:
+	dec bc				; 6
+	ld a, b				; 4
+	or c				; 4
+	jr nz, testSpeed_loop_inner	; 7/12
+	inc l				; 4
+	dec bc				; 6
+	nop					; 4
+	jr testSpeed_loop	; 12
+testSpeed_end:
+	
+; Restore address
+.org testSpeed_rom + (testSpeed_end - testSpeed_intFired)
+.echo $+0
+	
+; }
+
+
+
+; Compressed startup gradient {
+; Screen takes up 1536 bytes total
+; Startup gradient compressed down to 151 bytes
+
+startup_grad:
+	.db $7, $f8, $2, $f8, $2, $f8, $2, $f0, $2, $27, $55, $aa, $f0, $8, $f0, $8, $f0, $8, $f0, $8, $5, $f8, $4, $f8, $4, $f8, $4, $e8, $4, $1c, $55, $aa, $f0
+	.db $8, $f0, $8, $f0, $8, $f0, $8, $f8, $1, $ff, $f8, $8, $f8, $8, $f8, $8, $25, $55, $aa, $f0, $8, $f0, $8, $f0, $8, $f0, $8, $f8, $2, $f8, $2, $f8, $2, $f0, $2, $55, $1
+	.db $2b, $5, $2a, $1, $38, $8, $d8, $20, $d8, $20, $d8, $20, $c8, $20, $a, $5f, $2, $fd, $65, $5f, $ff, $7f, $ff, $5f, $ff, $d8, $20, $d8, $20, $d8, $20, $d0, $20, $7c, $5
+	.db $2a, $5, $aa, $11, $aa, $5, $aa, $d8, $20, $d8, $20, $d8, $20, $d8, $20, $3c, $57, $bf, $5f, $ff, $e8, $10, $e8, $10, $e8, $10, $e8, $10, $87, $17, $2f, $15, $af, $17, $2f
+	.db $55, $af, $d8, $20, $d8, $20, $d8, $20, $d0, $20, $0
+	
+; }
+
+
+
+exitApp:
+	di
+	; Disable clocks
+	call disable_clocks
+	; Setup interrupts
+	im 1
+	ld a, %00001011
+	out ($03), a
+	; Restore stack
+	ld sp, (spSave_os)
+	; Restore FLAGS pointer
+	ld iy, FLAGS
+	; Restore automatic LCD delay
+	ld bc, $0429
+	ld hl, autoLCD_A
+autoLCD_load_loop:
+	ld a, (hl) \ inc hl
+	out (c), a \ inc c
+	djnz autoLCD_load_loop
+	; Restore pages
+	ld a, $80
+	out ($05), a
+	inc a
+	out ($07), a
+	; Turn off audio output
+	xor a
+	out ($00), a
+	; Return to OS
+	ei
+	b_jump(_JForceCmdNoChar)
+
+
+
+save_defaultValues:
+	.db $27, $16
+
+def_vid_vars:
+	.db $00		;isPaused
+	.db $01		;decState
+	.dw imgB	;curImgBuff
+	.dw imgA	;greyImgBuff
+	.db $01		;inVidAaud
+	.db $01		;audEn
+	.dw greyMask+2	;greyMask_cur
+	.dw audA	;curAudBuff
+	.db $40		;startSamp
+
+arrowSpr:
+	.db %00000001, %00000000, %00000000, %00000000
+	.db %00000011, %10000000, %00000010, %10000000
+	.db %00000111, %11000000, %00000110, %11000000
+	.db %00000000, %00000000, %00001110, %11100000
+	.db %00000111, %11000000, %00000110, %11000000
+	.db %00000011, %10000000, %00000010, %10000000
+	.db %00000001, %00000000
+	
+;upArrowSpr:
+;	.db %00001000
+;	.db %00011100
+;	.db %00101010
+;	.db %00001000
+;	.db %00001000
+
+save_name:
+	.db $15, "AudVidSv"
+	
+
+
+; Video data will be appended after here by the converter program
+

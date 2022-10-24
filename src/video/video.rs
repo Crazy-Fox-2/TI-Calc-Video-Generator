@@ -38,7 +38,7 @@ impl<'a> Video<'a> {
         print_ln_if("".to_string(), !self.args.mute);
         let mut app = App::new(self.args, &self)?;
         let mut cur_frame = 0;
-        let mut auditer = audiostream::AudIter::new(&strcat!(self.folder, "audio.wav"), 48, 200)?;
+        let mut auditer = audiostream::AudIter::new(&strcat!(self.folder, "audio.wav"), 8, 120)?;
         
         // Skip audio before start of encoded video
         for _i in 0..self.start {

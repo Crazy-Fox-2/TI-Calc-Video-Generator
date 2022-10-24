@@ -8,8 +8,8 @@ use crate::helper::macros::{passerr, strcat};
 use std::io::Write;
 
 const PAGE_SIZE: usize = 16384;
-const MAX_CYCLE_COST: usize = 99102500;
-const START_SAMPLE: u8 = 124;
+const MAX_CYCLE_COST: usize = 104300;
+const START_SAMPLE: u8 = 0;
 
 
 pub struct App<'a> {
@@ -66,14 +66,17 @@ impl<'a> App<'a> {
     }
     
     pub fn add_frame(&mut self, img: &[u8], aud: &[u8]) -> Result<(), String> {
+        if self.prev_samp == 0 {
+            self.prev_samp = aud[0];
+        }
         // Generate image & audio instructions
         let start_samp = self.prev_samp;
         let mut instrs = vec![compress::lzss_alt::compress(img), {let (comp, last) = compress::nib_diff::compress(aud, self.prev_samp); self.prev_samp = last; comp}];
         // Reduce cycle cost
         let mut cycle_cost = compress::cycle_limit::get_total_cycles(&instrs);
-        if cycle_cost > MAX_CYCLE_COST {
-            cycle_cost = compress::cycle_limit::reduce_cycles_to(&mut instrs, MAX_CYCLE_COST);
-        }
+        //if cycle_cost > MAX_CYCLE_COST {
+        //    cycle_cost = compress::cycle_limit::reduce_cycles_to(&mut instrs, MAX_CYCLE_COST);
+        //}
         self.total_cycle_cost += cycle_cost;
         // Convert to bytecode
         let img_comp = compress::instr::gen_bytecode(&instrs[0]);
