@@ -41,8 +41,9 @@ impl<'a> Video<'a> {
         let mut auditer = audiostream::AudIter::new(&strcat!(self.folder, "audio.wav"), 8, 120)?;
         
         // Skip audio before start of encoded video
-        for _i in 0..self.start {
-            auditer.next();
+        // TODO: Make negative offset work with start at 0
+        for _i in 0..(self.start as isize + self.args.audoff as isize) {
+            let _ = auditer.next().unwrap();
         }
         loop {
             // Get frame number to encode
