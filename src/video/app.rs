@@ -8,7 +8,6 @@ use crate::helper::macros::{passerr, strcat};
 use std::io::Write;
 
 const PAGE_SIZE: usize = 16384;
-const MAX_CYCLE_COST: usize = 104300;
 const START_SAMPLE: u8 = 0;
 
 
@@ -74,9 +73,9 @@ impl<'a> App<'a> {
         let mut instrs = vec![compress::lzss_alt::compress(img), {let (comp, last) = compress::nib_diff::compress(aud, self.prev_samp); self.prev_samp = last; comp}];
         // Reduce cycle cost
         let mut cycle_cost = compress::cycle_limit::get_total_cycles(&instrs);
-        //if cycle_cost > MAX_CYCLE_COST {
-        //    cycle_cost = compress::cycle_limit::reduce_cycles_to(&mut instrs, MAX_CYCLE_COST);
-        //}
+        if cycle_cost > self.args.cycle_limit {
+            cycle_cost = compress::cycle_limit::reduce_cycles_to(&mut instrs, self.args.cycle_limit);
+        }
         self.total_cycle_cost += cycle_cost;
         // Convert to bytecode
         let img_comp = compress::instr::gen_bytecode(&instrs[0]);
