@@ -8,6 +8,7 @@ use crate::helper::macros::{passerr, strcat};
 use std::io::Write;
 
 const PAGE_SIZE: usize = 16384;
+const FRAMESCALE_ADDR: usize = 16789 - PAGE_SIZE;   // Will have to update this every time the base app gets re-assembled
 const START_SAMPLE: u8 = 0;
 
 
@@ -81,10 +82,12 @@ impl<'a> App<'a> {
         let img_comp = compress::instr::gen_bytecode(&instrs[0]);
         let mut aud_comp = compress::instr::gen_bytecode(&instrs[1]);   aud_comp.push(start_samp);
         // Output to debug file
-        let mut file = passerr!(File::create(strcat!("dbg/img_", self.frame_num.to_string(), ".bin")));     passerr!(file.write_all(img));
-        let mut file = passerr!(File::create(strcat!("dbg/imgc_", self.frame_num.to_string(), ".bin")));    passerr!(file.write_all(&img_comp));
-        let mut file = passerr!(File::create(strcat!("dbg/aud_", self.frame_num.to_string(), ".bin")));     passerr!(file.write_all(aud));
-        let mut file = passerr!(File::create(strcat!("dbg/audc_", self.frame_num.to_string(), ".bin")));    passerr!(file.write_all(&aud_comp));
+        if self.args.dbg_out {
+            let mut file = passerr!(File::create(strcat!("dbg/img_", self.frame_num.to_string(), ".bin")));     passerr!(file.write_all(img));
+            let mut file = passerr!(File::create(strcat!("dbg/imgc_", self.frame_num.to_string(), ".bin")));    passerr!(file.write_all(&img_comp));
+            let mut file = passerr!(File::create(strcat!("dbg/aud_", self.frame_num.to_string(), ".bin")));     passerr!(file.write_all(aud));
+            let mut file = passerr!(File::create(strcat!("dbg/audc_", self.frame_num.to_string(), ".bin")));    passerr!(file.write_all(&aud_comp));
+        }
         // Add frame to list
         let frame_size = img_comp.len() + aud_comp.len();
         self.total_img_size += img_comp.len();
@@ -122,6 +125,10 @@ impl<'a> App<'a> {
             self.first_page[0x0C + i] = putchar;
         }
         self.first_page[0x16] = self.page_num as u8;
+        // Write frame scale to first page
+        let scale: u16 = ((100000.0 / 512.0 / 8.0) / self.args.calc_fps * 256.0) as u16;
+        self.first_page[FRAMESCALE_ADDR] = scale as u8;
+        self.first_page[FRAMESCALE_ADDR+1] = (scale / 256) as u8;
         // Write first page to file
         self.out.seek(SeekFrom::Start(0x00)).unwrap();
         passerr!(self.out.write(&self.first_page));

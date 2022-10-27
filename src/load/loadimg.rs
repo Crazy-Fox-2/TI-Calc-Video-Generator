@@ -55,9 +55,9 @@ pub fn load_imgs(path: &str, keepall: bool, savefile: bool, dither_type: char)
 
 
 
-pub fn load_interleaved(path: &str, dither: char) -> Result<Vec<u8>, String> {
+pub fn load_interleaved(path: &str, dither: char, dbgsave: bool) -> Result<Vec<u8>, String> {
     // Get dithered image
-    let mut img = load_imgs(path, false, true, dither)?.0;
+    let mut img = load_imgs(path, false, dbgsave, dither)?.0;
     // Convert to byte stream
     let mut stream: Vec<u8> = vec![0; 12*64*2];
     let mut iter = img.pixels_mut();
@@ -80,9 +80,9 @@ pub fn load_interleaved(path: &str, dither: char) -> Result<Vec<u8>, String> {
     Ok(stream)
 }
 
-pub fn load_seperate(path: &str, dither: char) -> Result<Vec<u8>, String> {
+pub fn load_seperate(path: &str, dither: char, dbgsave: bool) -> Result<Vec<u8>, String> {
     // Get dithered image
-    let mut img = load_imgs(path, false, true, dither)?.0;
+    let mut img = load_imgs(path, false, dbgsave, dither)?.0;
     // Convert to byte stream
     let mut stream: Vec<u8> = vec![0; 12*64*2];
     let mut iter = img.pixels_mut();

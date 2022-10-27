@@ -30,6 +30,7 @@ pub fn load_vid_data(video: &mut Video, args: &VArgs) -> Result<(), String> {
         let contents = passerr!(fs::read_to_string(save_file), "Error loading video data file: {}");
         let mut lines = contents.split('\n');
         video.fps = lines.next().unwrap().parse().unwrap();
+        video.calc_fps = lines.next().unwrap().parse().unwrap();
         video.num_frames = NumFrames::Num(lines.next().unwrap().parse().unwrap());
     }
     Ok(())
@@ -43,7 +44,7 @@ pub fn save_vid_data(video: &Video, _args: &VArgs) -> Result<(), String> {
                 passerr!(fs::remove_dir_all(&video.folder));
             } else {
                 // Save video information to file
-                let data = strcat!(video.fps.to_string(), "\n", n.to_string(), "\n");
+                let data = strcat!(video.fps.to_string(), "\n", video.calc_fps.to_string(), "\n", n.to_string(), "\n");
                 let save_file = strcat!(video.folder, "save.txt");
                 fs::write(save_file, data).expect("Unable to write file");
             }
@@ -63,8 +64,9 @@ pub fn extract_video(args: &VArgs, folder_path: &str, vid_path: &str) -> Result<
     passerr!(fs::create_dir(folder_path));
     // Extract audio
     print_ln_if("Extracting audio stream".to_string(), !args.mute);
+    let sample_rate: usize = (args.calc_fps * 512.0) as usize;
     let mut aname_arg = folder_path.to_string();    aname_arg.push_str("audio.wav");
-    match Command::new("ffmpeg").args(["-i", vid_path, "-f", "wav", "-ar", "10240", "-ac", "1", "-vn", &aname_arg]).output() {
+    match Command::new("ffmpeg").args(["-i", vid_path, "-f", "wav", "-ar", &sample_rate.to_string(), "-ac", "1", "-vn", &aname_arg]).output() {
         Ok(_) => {},
         Err(e) => {
             return Err(format!("Error extracting audio: {}", e));

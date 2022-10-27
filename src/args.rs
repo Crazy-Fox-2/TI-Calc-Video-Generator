@@ -11,11 +11,12 @@ pub struct VArgs {
     pub name: String,
     pub start: usize,
     pub dur: usize,
-    pub fps: f64,
+    pub calc_fps: f64,
     pub mute: bool,
     pub dither: char,
     pub audoff: i32,
     pub cycle_limit: usize,
+    pub dbg_out: bool,
 }
 
 
@@ -26,14 +27,15 @@ pub fn getargs() -> Result<VArgs, String> {
     args.option("f", "folder", "Source/Dest video folder", "FOLDER", Occur::Optional, Some("".to_string()));
     args.option("o", "out", "Output application file", "OUT", Occur::Req, None);
     args.option("n", "name", "Output application name (8 chars max)", "NAME", Occur::Req, None);
-    args.option("d", "duration", "How many frames (20fps) to convert from the video, omit for entire video", "DUR", Occur::Optional, Some("0".to_string()));
-    args.option("s", "start", "Which frame (20fps) to start on, default first frame", "ST", Occur::Optional, Some("0".to_string()));
-    args.option("p", "fps", "Manually supply the fps instead of checking the video", "FPS", Occur::Optional, Some("0".to_string()));
+    args.option("d", "duration", "How many calculator frames to convert from the video, omit for entire video", "DUR", Occur::Optional, Some("0".to_string()));
+    args.option("s", "start", "Which calculator frame to start on, default first frame", "ST", Occur::Optional, Some("0".to_string()));
+    args.option("p", "fps", "Change framerate of video on the calculator, default 20fps, try to keep this close to 20 (19-21)", "FPS", Occur::Optional, Some("20.0".to_string()));
     args.option("a", "audoff", "Audio offset, a greater value means audio will play sooner, negative values allowed", "AUDOFF", Occur::Optional, Some("0".to_string()));
-    args.option("c", "cycle_limit", "Adjust maximum cycle cost per frame. Intended for debug/demonstrational use, try to avoid", "CT", Occur::Optional, Some("106000".to_string()));
-    
     args.option("t", "dither", "The dither mode, either f for floyd-steinburg or o for ordered, deafualt=o", "DITHER", Occur::Optional, Some("o".to_string()));
+    args.option("c", "cycle_limit", "Adjust maximum cycle cost per frame. Intended for debug/demonstrational use, try to avoid", "CT", Occur::Optional, Some("120000".to_string()));
+    
     args.flag("m", "mute", "Flag - shuts me up");
+    args.flag("g", "debug", "Flag - output debug files during convert");
     args.flag("h", "help", "Flag - Print this help message");
 
     /*
@@ -51,10 +53,12 @@ pub fn getargs() -> Result<VArgs, String> {
     */
 
     // Check for help argument
+    let mut done_help = false;
     let v: Vec<String> = env::args().collect();
     for s in v {
         if s.eq("-h") || s.eq("--help") {
             println!("{}", args.full_usage());
+            done_help = true;
         }
     }
     
@@ -72,14 +76,18 @@ pub fn getargs() -> Result<VArgs, String> {
             name: args.value_of::<String>("name").unwrap(),
             dur: args.value_of::<usize>("duration").unwrap(),
             start: args.value_of::<usize>("start").unwrap(),
-            fps: args.value_of::<f64>("fps").unwrap(),
+            calc_fps: args.value_of::<f64>("fps").unwrap(),
             mute: args.value_of::<bool>("mute").unwrap(),
             dither: args.value_of::<String>("dither").unwrap().chars().next().unwrap(),
             audoff: args.value_of::<i32>("audoff").unwrap(),
             cycle_limit: args.value_of::<usize>("cycle_limit").unwrap(),
+            dbg_out: args.value_of::<bool>("debug").unwrap(),
         } ),
         Err(err) => {
             println!("{}", err);
+            if !done_help {
+                println!("{}", args.full_usage());
+            }
             Err("Error parsing arguments".to_string())
         }
     }

@@ -21,6 +21,7 @@ pub struct Video<'a> {
     pub name: String,
     pub out: String,
     pub fps: f64,
+    pub calc_fps: f64,
     pub start: usize,
     pub durr: usize,
     pub temp: bool,
@@ -29,7 +30,7 @@ impl<'a> Video<'a> {
     
     pub fn new(args: &'a VArgs) -> Result<Video<'a>, String> {
         // Setup video struct
-        let mut vid = Video { args: args, num_frames: NumFrames::Num(0), folder: args.vid_folder.clone(), file: args.vid_file.clone(), name: args.name.clone(), out: args.out.clone(), fps: args.fps, durr: args.dur, start: args.start, temp: false };
+        let mut vid = Video { args: args, num_frames: NumFrames::Num(0), folder: args.vid_folder.clone(), file: args.vid_file.clone(), name: args.name.clone(), out: args.out.clone(), fps: 0.0, calc_fps: args.calc_fps, durr: args.dur, start: args.start, temp: false };
         load_vid_data(&mut vid, args)?;
         Ok(vid)
     }
@@ -47,7 +48,7 @@ impl<'a> Video<'a> {
         }
         loop {
             // Get frame number to encode
-            let src_frame = (((cur_frame + self.start) as f64 / 20.0) * self.fps) as usize + 1;
+            let src_frame = (((cur_frame + self.start) as f64 / self.calc_fps) * self.fps) as usize + 1;
             // Check on ffmpeg thread
             // Wait for next frame to exist (currently outputing from ffmpeg) or thread has
             // finished
@@ -72,7 +73,7 @@ impl<'a> Video<'a> {
             
             // Load image & audio data
             let fpath = strcat!(self.folder, "frame", src_frame.to_string(), ".png");
-            let img = loadimg::load_interleaved(&fpath, self.args.dither)?;
+            let img = loadimg::load_interleaved(&fpath, self.args.dither, self.args.dbg_out)?;
             let aud = auditer.next().unwrap();
             // Add to app
             app.add_frame(&img, &aud)?;
@@ -113,7 +114,7 @@ impl<'a> Video<'a> {
         }
     }
     fn set_durr(&mut self, max: usize) {
-        let max_durr = (((max-1) as f64 / self.fps) * 20.0) as usize - self.start;
+        let max_durr = (((max-1) as f64 / self.fps) * self.calc_fps) as usize - self.start;
         if self.durr == 0 || self.durr > max_durr {
             self.durr = max_durr;
         }
