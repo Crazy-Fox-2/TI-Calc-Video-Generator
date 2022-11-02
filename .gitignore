@@ -3,8 +3,9 @@
 /dbg/
 *.png
 *.8xk
-*.bin
-*.sh
+copyapp.sh
+tiVidConvert
+
 
 
 
