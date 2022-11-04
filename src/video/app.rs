@@ -6,6 +6,11 @@ use crate::VArgs;
 use std::fs::File;
 use crate::helper::macros::{passerr, strcat};
 use std::io::Write;
+#[cfg(target_os = "windows")]
+use crossterm::{cursor, execute};
+#[cfg(target_os = "windows")]
+use std::io::stdout;
+
 
 const PAGE_SIZE: usize = 16384;
 const FRAMESCALE_ADDR: usize = 16789 - PAGE_SIZE;   // Will have to update this every time the base app gets re-assembled
@@ -309,9 +314,19 @@ impl<'a> App<'a> {
                 0 => "??".to_string(),
                 _ => format!("{:02}", total_pages),
             };
-            println!("\x1B[1AFrames:{:04}/{}   Pages:{:02}/{}    Will fit on:  ({}) 84+  ({}) 83/84+SE", self.frame_num, total_frames, self.page_num, total_pages, base, se);
+            // Move to previous line
+            #[cfg(not(target_os = "windows"))]
+            {
+                print!("\x1B[1A");
+            }
+            #[cfg(target_os = "windows")]
+            {
+                execute!(stdout(), cursor::MoveToPreviousLine(1)).unwrap();
+            }
+            // Print progress
+            println!("Frames:{:04}/{}   Pages:{:02}/{}    Will fit on:  ({}) 84+  ({}) 83/84+SE", self.frame_num, total_frames, self.page_num, total_pages, base, se);
         }
-
+        
     }
     
 }
