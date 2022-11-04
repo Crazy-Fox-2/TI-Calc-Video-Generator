@@ -89,7 +89,7 @@ impl<'a> Video<'a> {
         print_ln_if(format!("Avg.  Frame  Cycles: {}", avg_cycle), !self.args.mute);
         // Run rabbitsign
         let bin_path = strcat!(self.folder, "out.bin");
-        passerr!(Command::new("rabbitsign").args(["-g", "-v", "-P", "-p", &bin_path, "-o", &strcat!(self.args.out, ".8xk")]).output());
+        passerr!(Command::new("rabbitsign").args(["-g", "-v", "-P", "-p", &bin_path, "-o", &strcat!(self.args.out, ".8xk")]).output(), "{}: Could not find rabbitsign program, double-check installation instructions");
         Ok(())
     }
     

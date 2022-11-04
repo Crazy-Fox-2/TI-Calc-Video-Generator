@@ -62,6 +62,10 @@ pub fn extract_video(args: &VArgs, folder_path: &str, vid_path: &str) -> Result<
     }
     // Create new folder
     passerr!(fs::create_dir(folder_path));
+    // Check if video file exists
+    if !fs::metadata(vid_path).is_ok() {
+        return Err("Could not locate given video file, you sure it exists?".to_string());
+    }
     // Extract audio
     print_ln_if("Extracting audio stream".to_string(), !args.mute);
     let sample_rate: usize = (args.calc_fps * 512.0) as usize;
@@ -81,10 +85,14 @@ pub fn extract_video(args: &VArgs, folder_path: &str, vid_path: &str) -> Result<
                 Ok(v) => v,
                 Err(e) => return Err(format!("Invalid UTF=8 sequence when extracting framerate: {}", e))
             };
-            let mut split = s.split(&['/', '\n']);
+            println!("{}", s);
+            let mut split = s.split(&['/', '\n', '\r']);
+            //println!("{}", split.next().unwrap());
+            //println!("{}", split.next().unwrap());
             let num: i32 = split.next().unwrap().parse().unwrap();
             let den: i32 = split.next().unwrap().parse().unwrap();
             let fps: f64 = num as f64 / den as f64;
+            //panic!();
             fps
         },
         Err(e) => {
