@@ -73,7 +73,7 @@ pub fn extract_video(args: &VArgs, folder_path: &str, vid_path: &str) -> Result<
     match Command::new("ffmpeg").args(["-i", vid_path, "-f", "wav", "-ar", &sample_rate.to_string(), "-ac", "1", "-vn", &aname_arg]).output() {
         Ok(_) => {},
         Err(e) => {
-            return Err(format!("Error extracting audio: {}", e));
+            return Err(format!("{}: Failed to run ffmpeg, double-check installation instructions", e));
         }
     }
     // Get framerate
@@ -85,7 +85,7 @@ pub fn extract_video(args: &VArgs, folder_path: &str, vid_path: &str) -> Result<
                 Ok(v) => v,
                 Err(e) => return Err(format!("Invalid UTF=8 sequence when extracting framerate: {}", e))
             };
-            println!("{}", s);
+            //println!("{}", s);
             let mut split = s.split(&['/', '\n', '\r']);
             //println!("{}", split.next().unwrap());
             //println!("{}", split.next().unwrap());
