@@ -229,7 +229,6 @@ impl<'a> App<'a> {
                     self.frame_sizes.pop(); self.frame_sizes.pop();
                     continue;
                 }
-                self.page.resize(PAGE_SIZE, 255);
                 // Write dictionary header information
                 self.page[0] = 0xA0;
                 self.page[1] = self.page_num as u8;
@@ -272,6 +271,11 @@ impl<'a> App<'a> {
                         self.page[dict_pos+1] = (pos / 256 + 0x80) as u8;
                         pos += data.len();
                     }
+                }
+                // Shrink page if only page
+                if !force_write_to_end && next_frame_imgs.len() == 0 {
+                    // Last page
+                    self.page.resize(pos, 255);
                 }
                 break;
             }
