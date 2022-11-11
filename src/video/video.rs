@@ -5,8 +5,9 @@ use std::process::Command;
 use crate::video::app::App;
 use std::sync::mpsc::Receiver;
 use crate::video::extract::{load_vid_data, save_vid_data};
-use crate::helper::funcs::print_ln_if;
+use crate::helper::funcs::{print_ln_if, find_file_exe};
 use std::io::{self, Write};
+use std::path::Path;
 
 
 
@@ -90,13 +91,16 @@ impl<'a> Video<'a> {
         print_ln_if(format!("Avg. Aud Frame Size: {}", avg_aud), !self.args.mute);
         print_ln_if(format!("Avg.  Frame  Cycles: {}", avg_cycle), !self.args.mute);
         // Get keyfile location
-        let mut exe_path = passerr!(std::env::current_exe());
-        exe_path.pop();
-        exe_path.push("keys");
-        exe_path.push("0104.key");
+        let key_path = match &self.args.key_source {
+            None => {
+                passerr!(find_file_exe("0104.key", &[ Path::new("keys").to_path_buf(),
+                                                      Path::new("rabbitsign").to_path_buf(),
+                                                      Path::new("./").to_path_buf() ]))
+            }, Some(path_str) => Path::new(&path_str).to_path_buf(),
+        };
         // Run rabbitsign
         let bin_path = strcat!(self.folder, "out.bin");
-        let output = passerr!(Command::new("rabbitsign").args(["-g", "-v", "-P", "-p", "-k", exe_path.to_str().unwrap(), &bin_path, "-o", &strcat!(self.args.out, ".8xk")]).output(), "{}: Could not find rabbitsign program, double-check installation instructions");
+        let output = passerr!(Command::new("rabbitsign").args(["-g", "-v", "-P", "-p", "-k", key_path.to_str().unwrap(), &bin_path, "-o", &strcat!(self.args.out, ".8xk")]).output(), "{}: Could not find rabbitsign program, double-check installation instructions");
         if !output.status.success() {
             io::stdout().write_all(&output.stderr).unwrap();
             io::stdout().write_all(&output.stdout).unwrap();
