@@ -6,6 +6,7 @@ use crate::video::app::App;
 use std::sync::mpsc::Receiver;
 use crate::video::extract::{load_vid_data, save_vid_data};
 use crate::helper::funcs::print_ln_if;
+use std::io::{self, Write};
 
 
 
@@ -87,10 +88,21 @@ impl<'a> Video<'a> {
         print_ln_if(format!("Avg. Img Frame Size: {}", avg_img), !self.args.mute);
         print_ln_if(format!("Avg. Aud Frame Size: {}", avg_aud), !self.args.mute);
         print_ln_if(format!("Avg.  Frame  Cycles: {}", avg_cycle), !self.args.mute);
+        // Get keyfile location
+        let mut exe_path = passerr!(std::env::current_exe());
+        exe_path.pop();
+        exe_path.push("keys");
+        exe_path.push("0104.key");
         // Run rabbitsign
         let bin_path = strcat!(self.folder, "out.bin");
-        passerr!(Command::new("rabbitsign").args(["-g", "-v", "-P", "-p", &bin_path, "-o", &strcat!(self.args.out, ".8xk")]).output(), "{}: Could not find rabbitsign program, double-check installation instructions");
-        Ok(())
+        let output = passerr!(Command::new("rabbitsign").args(["-g", "-v", "-P", "-p", "-k", exe_path.to_str().unwrap(), &bin_path, "-o", &strcat!(self.args.out, ".8xk")]).output(), "{}: Could not find rabbitsign program, double-check installation instructions");
+        if !output.status.success() {
+            io::stdout().write_all(&output.stderr).unwrap();
+            io::stdout().write_all(&output.stdout).unwrap();
+            Err("Failed to sign app, see above".to_string())
+        } else {
+            Ok(())
+        }
     }
     
     fn try_recv(&mut self) -> bool{
