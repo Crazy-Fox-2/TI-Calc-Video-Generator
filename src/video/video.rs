@@ -139,8 +139,10 @@ impl<'a> Video<'a> {
     }
     
     pub fn close(mut self) -> Result<(), String> {
-        while !self.try_recv() {}
-        save_vid_data(&self, self.args)?;
+        if !self.temp {
+            while !self.try_recv() {}
+            save_vid_data(&self, self.args)?;
+        }
         Ok(())
     }
     
