@@ -3,7 +3,8 @@ use crate::helper::funcs::*;
 use crate::compress;
 use std::io::{Seek, SeekFrom};
 use crate::VArgs;
-use std::fs::File;
+use std::fs::{self, File};
+use std::path::Path;
 use crate::helper::macros::{passerr, strcat};
 use std::io::Write;
 #[cfg(target_os = "windows")]
@@ -40,7 +41,13 @@ impl<'a> App<'a> {
     
     pub fn new(args: &'a VArgs, vid: &Video) -> Result<App<'a>, String> {
         // Load first page
-        let mut first_page = passerr!(file_from_wd_or_exe("appbase.bin"));
+        let mut first_page = match &args.app_source {
+            Some(path) => passerr!(fs::read(path)),
+            None => {
+                let path = passerr!(find_file_exe("audVid.bin", &[Path::new("z80").to_path_buf(), Path::new("./").to_path_buf()]));
+                passerr!(fs::read(path))
+            },
+        };
         let first_page_start = first_page.len();
         first_page.resize(PAGE_SIZE, 255);
         // Setup output file

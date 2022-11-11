@@ -1,7 +1,6 @@
-use std::path;
+use std::path::{self, PathBuf};
 use std::env;
 use crate::helper::macros::passerr;
-use std::fs;
 
 
 pub fn vec_copy<T: Copy>(to: &mut Vec<T>, tp: usize, from: &Vec<T>, fp: usize, len: usize) {
@@ -31,34 +30,46 @@ pub fn redist_range(val: f64, la: f64, ra: f64, lb: f64, rb: f64) -> f64 {
 }
 
 
-
-pub fn file_from_wd_or_exe(name: &str) -> Result<Vec<u8>, String> {
-    // Searches for the given file in the path of the executable then in the working directory
-    // First search in folder with executable
-    match env::current_exe() {
-        Ok(mut exe_path) => {
-            exe_path.pop();
-            match file_from_dir(exe_path, name) {
-                Ok(data) => return Ok(data),
-                Err(_) => {},
-            }
-        },
-        Err(_) => {},
-    };
-    // Second search in working directory
-    match env::current_dir() {
-        Ok(path) => {
-            Ok(passerr!(file_from_dir(path, name), "Error reading base app file: {}, is it in the executable folder or in the working directory?"))
-        },
-        Err(_err) => {
-            Err("Error finding both executable path and working directory".to_string())
+pub fn find_file(name: &str, search_in: &[PathBuf]) -> Result<PathBuf, String> {
+    // Search for file in the given directories
+    for search in search_in {
+        let mut path = search.clone();
+        path.push(name);
+        if path.exists() {
+            return Ok(path.to_path_buf());
         }
     }
+    Err(format!("File not found: {}", name))
 }
-pub fn file_from_dir(mut path: path::PathBuf, name: &str) -> Result<Vec<u8>, String> {
-    path.push(name);
-    Ok(passerr!(fs::read(path)))
+
+
+fn find_file_parent(name: &str, search_in: &[PathBuf], parent: &PathBuf) -> Result<PathBuf, String> {
+    // Search for a file, starting in a given parent directory and searching in each given
+    // sub-directory
+    let mut search_in_parent: Vec<PathBuf> = Vec::with_capacity(search_in.len());
+    for search in search_in {
+        let mut path = parent.clone();
+        path.push(search.clone());
+        search_in_parent.push(path.to_path_buf());
+    }
+    find_file(name, &search_in_parent)
 }
+
+pub fn find_file_exe(name: &str, search_in: &[PathBuf]) -> Result<PathBuf, String> {
+    // Search for given file in the executable directory, searching then in the given
+    // sub-directories
+    let mut exe_path = passerr!(env::current_exe(), "Error finding file in executable path: {}");
+    exe_path.pop();
+    find_file_parent(name, search_in, &exe_path)
+}
+
+pub fn find_file_wd(name: &str, search_in: &[PathBuf]) -> Result<path::PathBuf, String> {
+    // Search for given file starting in the working directory
+    let wd_path = passerr!(env::current_dir(), "Error finding file in the current directory: {}");
+    find_file_parent(name, search_in, &wd_path)
+}
+    
+
 
 
 // Given a set of sizes, find the combination of sizes which will sum up the closest to the target
@@ -71,9 +82,7 @@ pub fn file_from_dir(mut path: path::PathBuf, name: &str) -> Result<Vec<u8>, Str
 // acceptable.
 // Now it'll just iterate through all the sizes, adden them up, and subtracting some when going
 // over to hopefully find a combination which is "pretty good".
-// The origional code is commented out below the new code.
 pub fn find_fit(sizes: &Vec<usize>, target: usize) -> (Vec<usize>, Vec<bool>, usize) {
-    
     
     let len = sizes.len();
     let mut marked: Vec<usize> = Vec::new();
@@ -125,72 +134,6 @@ pub fn find_fit(sizes: &Vec<usize>, target: usize) -> (Vec<usize>, Vec<bool>, us
 
     
     (max_marked, bool_vec, max_total)
-    
-    
-    
-    /*
-    
-    let len = sizes.len();
-    let mut marked: Vec<bool> = vec![false; len];
-    let mut ptr = 0;
-    let mut total = 0;
-    let mut max_total = 0;
-    let mut max_marked = marked.clone();
-    
-    'main: loop {
-        
-        loop {
-            // Check if adding this value will keep us under the target
-            if total + sizes[ptr] <= target {
-                // Add value at pointer & mark as added
-                total += sizes[ptr];
-                marked[ptr] = true;
-                // Move to next value
-                // If we can't then continue to evaluate current total
-                if ptr+1 >= len {
-                    break;
-                }
-                ptr += 1;
-            } else {
-                // Continue to evaluate current total
-                break;
-            }
-        }
-        
-        // Is current total greater than max total?
-        if total > max_total {
-            max_total = total;
-            max_marked = marked.clone();
-        }
-        
-        loop {
-            // Move back to previous marked value
-            // If there are no more, then we're done
-            while marked[ptr] == false {
-                if ptr == 0 {
-                    break 'main;
-                }
-                ptr -= 1;
-            }
-            // Unmark this one & subtract from total
-            marked[ptr] = false;
-            total -= sizes[ptr];
-            // Begin evaluating next value if we have one, otherwise loop
-            if ptr+1 < len {
-                ptr += 1;
-                break;
-            }
-        }
-
-        println!("{:?}", marked);
-        
-    }
-
-    panic!();
-    
-    (max_marked, max_total)
-
-    */
     
 }
 

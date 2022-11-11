@@ -17,6 +17,8 @@ pub struct VArgs {
     pub audoff: i32,
     pub cycle_limit: usize,
     pub dbg_out: bool,
+    pub app_source: Option<String>,
+    pub key_source: Option<String>,
 }
 
 
@@ -32,7 +34,9 @@ pub fn getargs() -> Result<VArgs, String> {
     args.option("p", "fps", "Change framerate of video on the calculator, default 20fps, try to keep this close to 20 (19-21)", "FPS", Occur::Optional, Some("20.0".to_string()));
     args.option("a", "audoff", "Audio offset, a greater value means audio will play sooner, negative values allowed", "AUDOFF", Occur::Optional, Some("0".to_string()));
     args.option("t", "dither", "The dither mode, either f for floyd-steinburg or o for ordered, deafualt=o", "DITHER", Occur::Optional, Some("o".to_string()));
-    args.option("c", "cycle_limit", "Adjust maximum cycle cost per frame. Intended for debug/demonstrational use, try to avoid", "CT", Occur::Optional, Some("120000".to_string()));
+    args.option("c", "cycle_limit", "Adjust maximum cycle cost per frame. Intended for debug/demonstrational use", "CT", Occur::Optional, Some("120000".to_string()));
+    args.option("z", "source", "Source application data. Defaults to the provide application data", "SOURCE", Occur::Optional, Some("".to_string()));
+    args.option("k", "keyfile", "Keyfile to be passed to Rabbitsign, default is to use the provided 0104.key", "KEYFILE", Occur::Optional, Some("".to_string()));
     
     args.flag("m", "mute", "Flag - shuts me up");
     args.flag("g", "debug", "Flag - output debug files during convert");
@@ -82,6 +86,14 @@ pub fn getargs() -> Result<VArgs, String> {
             audoff: args.value_of::<i32>("audoff").unwrap(),
             cycle_limit: args.value_of::<usize>("cycle_limit").unwrap(),
             dbg_out: args.value_of::<bool>("debug").unwrap(),
+            app_source: {match args.value_of::<String>("source") {
+                Ok(s) => Some(s),
+                Err(_) => None,
+            }},
+            key_source: {match args.value_of::<String>("key") {
+                Ok(s) => Some(s),
+                Err(_) => None,
+            }},
         } ),
         Err(err) => {
             println!("{}", err);
