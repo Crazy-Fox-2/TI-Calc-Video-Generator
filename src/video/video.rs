@@ -85,6 +85,7 @@ impl<'a> Video<'a> {
         // Finish app
         let (num_pages, avg_img, avg_aud, avg_cycle) = app.finish()?;
         app.print_progress(self.durr, num_pages);
+        print_ln_if("\nFinished converting app".to_string(), !self.args.mute);
         print_ln_if(format!("Avg. Img Frame Size: {}", avg_img), !self.args.mute);
         print_ln_if(format!("Avg. Aud Frame Size: {}", avg_aud), !self.args.mute);
         print_ln_if(format!("Avg.  Frame  Cycles: {}", avg_cycle), !self.args.mute);
@@ -101,6 +102,7 @@ impl<'a> Video<'a> {
             io::stdout().write_all(&output.stdout).unwrap();
             Err("Failed to sign app, see above".to_string())
         } else {
+            print_ln_if("\nFinished signing app".to_string(), !self.args.mute);
             Ok(())
         }
     }
