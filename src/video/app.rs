@@ -206,7 +206,7 @@ impl<'a> App<'a> {
                 break;
             } else {
                 // The first two pages are special
-                // The first contains the app header all the video-playback code at the start of
+                // The first contains the app header and all the video-playback code at the start of
                 // the page, where the dictionary usually goes
                 // Because the first page is always loaded for code execution, the second page is
                 // treated as the first video data page by the application and the dictionary there

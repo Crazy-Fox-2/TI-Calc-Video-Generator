@@ -2,8 +2,17 @@
 ; audVid
 ; Simultaneous Audio & Video player for the Ti-83+SE and derivatives
 ; 
-; Last modified: 3 Oct 2022
+; Last modified: 11 Nov 2022
 ;
+
+
+; TODO:
+; -Create general instructions
+; -Github project finished
+; -Prepare video demonstration
+; -Test on some other videos
+
+
 
 .nolist
 #include "ti83plus.inc"
@@ -58,14 +67,18 @@ saveLoc_raw	.equ	$9872
 savePage_raw .equ	$9874
 
 
-intPosA		.equ	$C2
-intPosB		.equ	$C0
+intPosA		.equ	$C2C2
+intPosA_hi	.equ	$C2
+intPosB		.equ	$C0C0
+intPosB_hi	.equ	$C0
+
+codeRam		.equ	$C400
 
 
 ; These variables will have default values copied into them before jumping to video player
 copy_to_def	.equ	$CA00
 isPaused	.equ	$CA00		; Flag indicating if we are currently paused
-decState	.equ	$CA01		; Current state of the decompression, FF=start next, 00=workin' on it, 01=waiting for next frame to start
+decState	.equ	$CA01		; Current state of the decompression, 00=workin' on it, 01=ready for next frame
 curImgBuff	.equ	$CA02		; Pointer to image buffer we will be decompressing into
 greyImgBuff	.equ	$CA04		; Pointer to image buffer we will be drawing to the screen
 inVid		.equ	$CA06		; Flag indicating if we are playing the video or if we are in the options menu
@@ -81,7 +94,6 @@ winddown_default = $02
 prevEnter	.equ	$CA14		; Previous keyboard value for the enter key
 prevArrow	.equ	$CA15		; Previous keyboard value for the arrow keys
 frameList_cur .equ	$CA18		; Current frame lookup position
-hlSave		.equ	$CA1A		; Temperary save location for hl used in greyscale routine
 compImgStart .equ	$CA1C		; Pointer to where the compressed image is for this frame
 compAudStart .equ	$CA1E		; Pointer to where the compressed audio is for this frame
 
@@ -98,7 +110,8 @@ autoLCD_C	.equ	$CA2C
 autoLCD_D	.equ	$CA2D
 intSpacing	.equ	$CA2E		; How often the audio interupts fire
 
-
+intFreqTimer3 .equ	$CA30		; Base frequency for timer 3 (during setup for timers 1 & 2)
+intFreqTimer12 .equ	$CA31		; Base frequency for timers 1 & 2
 cur_column	.equ	$CA32		; Current column in screen draw
 audDecHiCount	.equ	$CA33	; Used during audio decompression
 
@@ -114,7 +127,7 @@ intTableB	.equ	$F600		; Interrupt Table when outputing greyscale image
 intTableA_hi .equ	$F4
 intTableB_hi .equ	$F6
 
-silence		.equ	$F800
+silence		.equ	$F708
 audA		.equ	$FA00
 audB		.equ	$FC00
 
@@ -124,9 +137,6 @@ pageType	.equ	$8000		; bit0 set = first page, bit1 set = last page
 pageNum		.equ	$8001
 lastFrame	.equ	$8002
 firstFrame_const	.equ	$8004
-
-
-
 
 
 
@@ -160,6 +170,13 @@ startup_waitForEnter:
 	in a, ($01)
 	and %00000001
 	jr z, startup_waitForEnter
+	
+	
+	; Check if 83+BE
+	in a, ($02)
+	rlca
+	jp nc, exitApp_bjump
+	
 	
 	
 	; Before taking control of the calculator, ask Ti-OS to give us the location of our save data
@@ -196,16 +213,29 @@ save_save:
 	ld a, $83
 	out ($05), a
 	
+	; Fill memory with 0
+	ld hl, $E000
+	ld de, $E001
+	ld bc, $1F80
+	ld (hl), 0
+	ldir
+	
 	; Save stack pointer
 	ld (spSave_os), sp
 	
-	; Save & disable automatic LCD delay settings
+	; Copy main ram routines
+	ld hl, ramRoutines_rom
+	ld de, ramRoutines_ram
+	ld bc, $0500
+	ldir
+	
+	; Save automatic LCD delay settings & disable instruction delays
 	ld bc, $0429
 	ld hl, autoLCD_A
 autoLCD_save_loop:
 	in a, (c)
 	ld (hl), a \ inc hl
-	ld a, $0C		; Minimum delay to keep the LCD responding
+	xor a
 	out (c), a
 	inc c
 	djnz autoLCD_save_loop
@@ -223,14 +253,14 @@ autoLCD_save_loop:
 	; Setup interrupt table & mode
 	im 2
 	ld hl, intTableB
-	ld (hl), intPosB
+	ld (hl), intPosB_hi
 	ld de, intTableB+1
 	ld b, $01			; ld bc, $0100:	c already zero
 	ldir
 	ld hl, intTableA
 	ld a, h
 	ld i, a
-	ld (hl), intPosA
+	ld (hl), intPosA_hi
 	ld de, intTableA+1
 	ld b, $01			; ld bc, $0100:	c already zero
 	ld a, b				; For next
@@ -243,13 +273,6 @@ autoLCD_save_loop:
 	xor a
 	out ($30), a
 	out ($36), a
-	
-	; Fill silence
-	ld de, silence+1
-	ld hl, silence
-	ld (hl), a
-	ld bc, 520
-	ldir
 	
 	; Set LCD direction
 	ld a, $05
@@ -279,7 +302,7 @@ correctSaveLoc_mod:
 	; Offset location if located in rom (right now it points to the VAT entry in rom)
 	cp $80
 	jr nc, correctSaveLoc_notRom
-	ld de, 16
+	ld de, 18
 	add hl, de
 correctSaveLoc_notRom:
 	ld (saveLoc), hl
@@ -292,6 +315,11 @@ correctSaveLoc_notRom:
 	call in_range_all
 	ld (sav_refr), hl
 	
+	; Default frequency bases for timers
+	ld a, $84
+	ld (intFreqTimer12), a
+	ld a, $82
+	ld (intFreqTimer3), a
 	
 	
 	; Calculate processor speed
@@ -307,9 +335,9 @@ correctSaveLoc_notRom:
 	ld a, %00000010
 	out ($37), a
 	
-	; Get speed of settings 0-3 and keep track of the fastest one
+	; Get speed of settings 0-3 and keep track of the fastest one in the best range
 	ld bc, $0000	; c - fastest speed, b - fastest setting
-	ld d, $04		; current setting being tested
+	ld de, $0402	; d - current setting being tested, e - current range
 testSpeed_settingLoop:
 	dec d
 	ld a, d
@@ -319,13 +347,54 @@ testSpeed_settingLoop:
 	call testSpeed
 	pop bc
 	pop de
-	; Check if faster
+	
+	
+	; Check which range
+	ld a, l
+	cp 150
+	jr nc, testSpeed_rangeAorB
+	; Range C (02)
+	; Check if current best in range C, if it is try and update
+	ld a, e
+	ld h, $02
+	cp h
+	jr z, testSpeed_updateIfFaster
+	jr testSpeed_noUpdate
+testSpeed_rangeAorB:
+	cp 205
+	jr c, testSpeed_rangeA
+	; Range B (01)
+	; Check which range current best in
+	ld a, e
+	ld h, $01
+	cp h
+	jr nc, testSpeed_update		; Was in C
+	jr nz, testSpeed_noUpdate	; Was in A
+	; Was in B
+	; Check if new speed is slower than current best
 	ld a, l
 	cp c
-	jr c, testSpeed_notFaster
+	jr nc, testSpeed_noUpdate
+	jr testSpeed_update
+testSpeed_rangeA:
+	; Range A (00)
+	; Check if current best in range A, if was not guarenteed update
+	ld a, e
+	ld h, 0
+	cp h
+	jr nz, testSpeed_update
+	
+	
+testSpeed_updateIfFaster:
+	; Check if new speed is faster than current best
+	ld a, l
+	cp c
+	jr c, testSpeed_noUpdate
+testSpeed_update:
 	ld b, d
 	ld c, l
-testSpeed_notFaster:
+	ld e, h
+testSpeed_noUpdate:
 	; Loop
 	xor a
 	or d
@@ -334,12 +403,37 @@ testSpeed_notFaster:
 	; Set cpu to the provided fastest speed
 	ld a, b
 	out ($20), a
-	
-	; Check if is fast enough (14.6 Hz is the lowest allowed speed)
 	ld a, c
 	ld (calcSpeed), a
-	cp 146
-	jr nc, testSpeed_noError
+	
+	; Check if in range A
+	ld a, e
+	or a
+	jr z, testSpeed_noError
+	
+	ld a, $FD
+	out ($01), a
+	; Display error message
+	ld iy, FLAGS
+	res textWrite, (iy + sGrFlags)
+	ld a, $F0
+	call setLCDDelays
+	ld hl, error_speed
+	call disp_text
+	ld hl, error_press_on
+	call disp_text
+	
+	; Wait until enter or on is pressed
+testSpeed_error_loop:
+	ex (sp), hl
+	ex (sp), hl
+	in a, ($01)
+	and %00000001
+	jr z, testSpeed_noError
+	in a, ($04)
+	bit 3, a
+	jp z, exitApp
+	jr testSpeed_error_loop
 	
 testSpeed_noError:
 	
@@ -347,8 +441,10 @@ testSpeed_noError:
 	
 	; Calculate audio interrupt spacing
 	ld a, (calcSpeed)
-	ld de, $0138
-	; Multiply a and de (res in ahl) (https://wikiti.brandonw.net/index.php?title=Z80_Routines:Math:Multiplication)
+.echo "Framerate Scale Addr: ", $+1
+	ld de, $0138	; 1.21875
+	; Multiply a and de (res in ahl)
+	; (directly taken from: https://wikiti.brandonw.net/index.php?title=Z80_Routines:Math:Multiplication)
 	ld c, 0
 	ld h, c
 	ld l, h
@@ -365,9 +461,36 @@ mult_loop:
 	adc a, c		; yes this is actually adc a, 0 but since c is free we set it to zero and so we can save 1 byte and up to 3 T-states per iteration
 	djnz mult_loop
 	
-	ld l, h
-	ld h, a
-	ld (intSpacing), hl
+	; Check if int spacing fist in a single byte
+	or a
+	jr z, intSpacing_singleByte
+	; Divide int spacing by 2 and half clock frequency for timers
+	rrca
+	rr h
+	ld a, $88
+	ld (intFreqTimer12), a
+	ld a, $84
+	ld (intFreqTimer3), a
+intSpacing_singleByte:
+	ld a, h
+	ld (intSpacing), a
+	
+	; Calculate LCD Delay
+	ld a, (calcSpeed)
+	; Upper-bound
+	cp 210
+	jr c, setLCDDelay_inHighBound
+	ld a, 210
+setLCDDelay_inHighBound:
+	; Lower-bound
+	cp 150
+	jr nc, setLCDDelay_inLowBound
+	ld a, 150
+setLCDDelay_inLowBound:
+	sub 147
+	rlca \ rlca
+	; Output to ports
+	call setLCDDelays
 	
 	
 	jr setupDisplay
@@ -417,6 +540,9 @@ modify_noUp:
 	inc hl
 	ld (hl), d
 	
+	; Discharge Keypad
+	ld a, $FF
+	out ($01), a
 	
 	
 	
@@ -432,9 +558,6 @@ setupDisplay:
 	ld de, plotSScreen+1
 	ld bc, $02FF
 	ldir
-	
-	call copy_ram_main
-	
 	
 	; Decompress gradiant
 	ld hl, startup_grad
@@ -459,21 +582,13 @@ drawArrow_loop:
 	djnz drawArrow_loop
 	
 	
-	; Draw text
-	ld b, msg_list_len
-	ld hl, msg_list
 	; Setup flags
 	res textInverse, (iy + textFlags)
 	set textWrite, (iy + sGrFlags)
 	res fracDrawLFont, (iy + fontFlags)
-putMsg_loop:
-	; Get position of text
-	ld e, (hl)	\	inc hl
-	ld d, (hl)	\	inc hl
-	ld (penCol), de
 	; Draw text
-	b_call(_VPutS)
-	djnz putMsg_loop
+	ld hl, msg_list
+	call disp_text
 	
 	
 	; Draw hex digits
@@ -556,11 +671,10 @@ grToA_rowLoop:
 setupVidLoop_skipOpt:
 	
 	
-	
-	; Copy main ram code
+	; Copy normal interrupt data
 	ld hl, normInt_rom
 	ld de, normInt_ram
-	ld bc, $0600
+	ld bc, codeRam - normInt_ram
 	ldir
 	
 	
@@ -572,23 +686,23 @@ setupVidLoop_skipOpt:
 	; Copy timer setup code
 	ld hl, setupCrystal_rom
 	ld de, setupCrystal_ram
-	ld b, $01
+	ld bc, $0100
 	ldir
 	; Point interrupts to setup code
 	ld a, intTableB_hi
 	ld i, a
 	
 	; Initial setup for timers 1 & 2
-	ld a, $84
+	ld a, (intFreqTimer12)
 	out ($30), a
 	out ($33), a
 	ld a, $03
 	out ($31), a
 	out ($34), a
 	; Setup register
-	ld b, 2
+	ld b, 3
 	; Setup timer 3
-	ld a, $82
+	ld a, (intFreqTimer3)
 	out ($36), a
 	ld a, $03
 	out ($37), a
@@ -597,7 +711,7 @@ setupVidLoop_skipOpt:
 	; Enable interrupts & wait until timers are set up
 	ei
 setupCrystal_loop:
-	jr setupCrystal_loop
+	jp silence		; slide of nop's until timers set-up
 	
 setupCrystal_done:
 	; Done!
@@ -614,11 +728,17 @@ setupCrystal_done:
 	; Enable interrupts so countdowns don't get messed up during ldir
 	ei
 	
+	; Setup timer 3
+	ld a, (audEn)
+	or a
+	jr nz, $+4
+	out ($36), a
+	
 	
 	; Copy greyscale interrupt code
 	ld hl, greyInt_rom
 	ld de, greyInt_ram
-	ld bc, $C2C2 - $C0C0
+	ld bc, normInt_ram - greyInt_ram
 	ldir
 	
 	
@@ -628,7 +748,6 @@ setupCrystal_done:
 	out ($07), a
 	
 	; Setup stack so after first frame setup we return to decompression loop
-.echo $+0
 	ld hl, dec_start
 	push hl
 	
@@ -646,6 +765,36 @@ setupCrystal_done:
 
 
 ; Misc. Subroutines {
+	
+setLCDDelays:
+	out ($29), a
+	out ($2A), a
+	out ($2B), a
+	out ($2C), a
+	ret
+	
+restoreLCDDelays:
+	ld bc, $0429
+	ld hl, autoLCD_A
+autoLCD_load_loop:
+	ld a, (hl) \ inc hl
+	out (c), a \ inc c
+	djnz autoLCD_load_loop
+	ret
+	
+	
+disp_text:
+	; Get number of lines
+	ld b, (hl)	\	inc hl
+disp_text_loop:
+	; Get position of text
+	ld e, (hl)	\	inc hl
+	ld d, (hl)	\	inc hl
+	ld (penCol), de
+	; Draw text
+	b_call(_VPutS)
+	djnz disp_text_loop
+	ret
 	
 	
 	
@@ -677,7 +826,7 @@ in_range_all:
 	call in_range
 	ld h, a
 	ld a, l
-	ld de, $2650
+	ld de, $2440
 	call in_range
 	ld l, a
 	ret
@@ -709,18 +858,6 @@ disable_clocks:
 	ret
 	
 	
-copy_ram_main:
-	; Copy main ram code
-	ld hl, greyInt_rom
-	ld de, greyInt_ram
-	ld bc, $C2C2 - $C0C0
-	ldir
-	ld hl, normInt_rom
-	ld de, normInt_ram
-	ld b, $06
-	ldir
-	ret
-	
 	
 	
 ; }
@@ -732,7 +869,7 @@ copy_ram_main:
 ; Setup crystal timer positions {
 	
 setupCrystal_rom:
-setupCrystal_ram	.equ	$C0C0
+setupCrystal_ram	.equ	intPosB
 .org setupCrystal_ram
 	
 	
@@ -745,11 +882,13 @@ setupCrystal_ram	.equ	$C0C0
 	out ($37), a		; 11
 	
 	; Check which timer to setup
-	djnz setupCrystal_timer2	; 8/13	; 2
+	djnz setupCrystal_timer2	; 8/13
 	
 	; Delay
-	or a				; 4
-	ret c				; 5
+	dec sp				; 6*
+	inc sp				; 6*
+	inc a				; 4*
+	dec a				; 4*
 	; b is 0, setup timer 1 & exit
 	ld a, (intSpacing)	; 13
 	out ($32), a		; 11
@@ -757,8 +896,10 @@ setupCrystal_ram	.equ	$C0C0
 	
 	
 setupCrystal_timer2:
-	; Delay
-	or a				; 4
+	; Check that b is 1
+	ld a, b				; 4
+	dec a				; 4
+	jr nz, setupCrystal_ret	; 7/12
 	; b is 1, setup timer 2
 	ld a, (intSpacing)	; 13
 	out ($35), a		; 11
@@ -770,7 +911,6 @@ setupCrystal_ret:
 	
 setupCrystal_ramEnd:
 .org (setupCrystal_ramEnd - setupCrystal_ram) + setupCrystal_rom
-.echo $+0
 	
 	
 ; }
@@ -784,7 +924,7 @@ setupCrystal_ramEnd:
 	
 	
 greyInt_rom:
-greyInt_ram		.equ	$C0C0
+greyInt_ram		.equ	intPosB
 .org greyInt_ram
 	
 	
@@ -846,7 +986,7 @@ audG_pullLow_noGrey:
 	
 	; 135 cycles
 	
-	; Delay
+	; Correct hl
 	dec hl				; 6*	; 1
 	
 	; Set branch to normal greyscale pull low
@@ -891,7 +1031,7 @@ audG_pullLow:
 	
 	exx					; 4		; 1
 	
-	; Output image strip (100 cycles)
+	; Output image strip (97 cycles)
 	ld a, (iy)			; 19	; 3
 	and (hl)			; 7		; 1
 	inc hl				; 6		; 1
@@ -902,9 +1042,9 @@ audG_pullLow:
 	inc hl				; 6		; 1
 	or c				; 4		; 1
 	inc iy				; 10	; 2
-	out ($11), a		; 14	; 2
+	out ($11), a		; 11	; 2
 	
-	; 258 cycles
+	; 255 cycles
 	
 	; Correct hl from delay above
 	exx					; 4		; 1
@@ -935,21 +1075,20 @@ column_pos	.equ	$+1
 	add iy, de			; 15	; 2
 	pop de				; 10	; 1
 	
-	; 400 cycles
-	
-	; Delay
-	ld a, (hl)			; 7*	; 1
+	; 397 cycles
 	
 	; Output next column
 	ld a, (cur_column)	; 13	; 3
-	out ($10), a		; 14	; 2
+	out ($10), a		; 11	; 2
+	
+	; 421 cycles
 	
 	; Return
 	exx					; 4		; 1
 	pop af				; 10	; 1
 	ret					; 10	; 1
 	
-	; 458 cycles
+	; 445 cycles
 	
 	
 	; Finished with greyscale {
@@ -963,7 +1102,7 @@ audG_pullLow_greyDone:
 	ld a, intTableA/256	; 7		; 2
 	ld i, a				; 9		; 2
 	
-	; 373 cycles
+	; 364 cycles
 	
 	; Setup frame counter high-byte
 	ld a, (aud_next_branch)	; 13	; 3
@@ -978,13 +1117,19 @@ audG_pullLow_greyDone_inFrameHi:
 	ld a, (sav_refr)	; 13	; 3
 	ld c, a				; 4		; 1
 	
+	; Set row
+	ld a, $80			; 7		; 2
+	out ($10), a		; 11	; 2
+	
+	; 440/442 cycles
+	
 	; Return
 	exx					; 4		; 1
 	pop af				; 10	; 1
 	ei					; 4		; 1
 	ret					; 10	; 1
 	
-	; 453/455 cycles
+	; 468/470 cycles
 	
 	
 ; }
@@ -995,15 +1140,15 @@ audG_pullLow_noNewCol:
 ; }
 	
 	
-	; 308 cycles
+	; 305 cycles
 	
 	; Delay
-	ld a, (hl)			; 7*	; 1
-	ld a, (hl)			; 7*	; 1
 	nop					; 4*	; 1
-	ld a, (hl)			; 7*	; 1
+	nop					; 4*	; 1
+	nop					; 4*	; 1
+	nop					; 4*	; 1
 	
-	; Output image strip (100 cycles)
+	; Output image strip (97 cycles)
 	ld a, (iy)			; 19	; 3
 	and (hl)			; 7		; 1
 	inc hl				; 6		; 1
@@ -1016,15 +1161,18 @@ audG_pullLow_noNewCol:
 	inc iy				; 10	; 2
 	out ($11), a		; 14	; 2
 	
+	; 418 cycles
+	
 	; Delay
-	ld c, 2				; 7*	; 2
+	ld c, 3				; 7*	; 2
 audG_pullLow_delayLoop:
 	dec c				; 4*	; 1
 	jr nz, audG_pullLow_delayLoop	; 7/12*	; 2
-	ld a, (hl)			; 7*	; 1
+	inc bc				; 6*	; 1
+	dec bc				; 6*	; 1
 	
 	
-	; Output image strip (104 cycles)
+	; Output image strip (101 cycles)
 	ld a, (iy)			; 19	; 3
 	and (hl)			; 7		; 1
 	inc hl				; 6		; 1
@@ -1036,16 +1184,16 @@ audG_pullLow_delayLoop:
 	or c				; 4		; 1
 	inc iy				; 10	; 2
 	exx					; 4		; 1
-	out ($11), a		; 14	; 2
+	out ($11), a		; 11	; 2
 	
 	
-	; 608 cycles
+	; 581 cycles
 	
 	; Return
 	pop af				; 10	; 1
 	ret					; 10	; 1
 	
-	; 628 cycles
+	; 601 cycles
 	
 	
 	
@@ -1096,15 +1244,15 @@ audG_next:
 	ld a, (iy)			; 19	; 3
 	and (hl)			; 7		; 1
 	or c				; 4		; 1
-	out ($11), a		; 14	; 2
+	out ($11), a		; 11	; 2
 	
-	; 256 cycles
+	; 253 cycles
 	
 	inc iy				; 10	; 2
 	inc hl				; 6		; 1
 	inc hl				; 6		; 1
 	
-	; 278 cycles
+	; 275 cycles
 	
 	
 	
@@ -1153,16 +1301,13 @@ audG_next_noNewCol:
 	
 	
 	
-	; 315 cycles
+	; 312 cycles
 	
 	
 	; Delay
-	nop					; 4*	; 1
-	nop					; 4*	; 1
-	nop					; 4*	; 1
-	nop					; 4*	; 1
+	ld a, (hl)			; 7*	; 1
 	
-	; Output image strip (100 cycles)
+	; Output image strip (97 cycles)
 	ld a, (iy)			; 19	; 3
 	and (hl)			; 7		; 1
 	inc hl				; 6		; 1
@@ -1173,9 +1318,9 @@ audG_next_noNewCol:
 	inc hl				; 6		; 1
 	or c				; 4		; 1
 	inc iy				; 10	; 2
-	out ($11), a		; 14	; 2
+	out ($11), a		; 11	; 2
 	
-	; 431 cycles
+	; 416 cycles
 	
 	; Get next sample
 	ld a, (de)			; 7		; 1
@@ -1184,13 +1329,12 @@ audG_next_noNewCol:
 	
 	; Delay
 	push hl				; 11*	; 1
-	push de				; 11*	; 1
+	ld a, (hl)			; 7*	; 1
+	inc hl				; 6*	; 1
+	ld a, (hl)			; 7*	; 1
 	pop hl				; 10*	; 1
-	pop hl				; 10*	; 1
-	inc a				; 4*	; 1
-	dec a				; 4*	; 1
 	
-	; Output image strip (104 cycles)
+	; Output image strip (101 cycles)
 	ld a, (iy)			; 19	; 3
 	and (hl)			; 7		; 1
 	inc hl				; 6		; 1
@@ -1202,14 +1346,16 @@ audG_next_noNewCol:
 	or c				; 4		; 1
 	inc iy				; 10	; 2
 	exx					; 4		; 1
-	out ($11), a		; 14	; 2
+	out ($11), a		; 11	; 2
+	
+	; 579 cycles
 	
 	
 	; Return
 	pop af				; 10	; 1
 	ret					; 10	; 1
 	
-	; 626 cycles
+	; 599 cycles
 	
 	
 	
@@ -1260,15 +1406,15 @@ audG_next_twoGrey:
 	ld a, (iy)			; 19	; 3
 	and (hl)			; 7		; 1
 	or c				; 4		; 1
-	out ($11), a		; 14	; 2
+	out ($11), a		; 11	; 2
 	
-	; 256 cycles
+	; 253 cycles
 	
 	inc iy				; 10	; 2
 	inc hl				; 6		; 1
 	inc hl				; 6		; 1
 	
-	; 278 cycles
+	; 275 cycles
 	
 	dec b				; 4		; 1
 	
@@ -1278,7 +1424,7 @@ audG_next_twoGrey:
 	ld (audG_next_branch), hl	; 16	; 3
 	pop hl				; 10	; 1
 	
-	; Output image strip (100* cycles)
+	; Output image strip (101 cycles)
 	ld a, (iy)			; 19	; 3
 	and (hl)			; 7		; 1
 	inc hl				; 6		; 1
@@ -1290,15 +1436,15 @@ audG_next_twoGrey:
 	or c				; 4		; 1
 	inc iy				; 10	; 1
 	exx					; 4		; 1
-	out ($11), a		; 14	; 2
+	out ($11), a		; 11	; 2
 	
-	; 433 cycles
+	; 427 cycles
 	
 	; Return
 	pop af				; 10	; 1
 	ret					; 10	; 1
 	
-	; 453 cycles
+	; 447 cycles
 	
 ; }
 	
@@ -1313,7 +1459,7 @@ greyInt_ram_end:
 	
 	
 normInt_rom:
-normInt_ram		.equ	$C2C2
+normInt_ram		.equ	intPosA
 .org normInt_ram
 	
 	
@@ -1376,6 +1522,8 @@ audN_next_noNewFrame:
 	ei					; 4		; 1
 	ret					; 10	; 1
 	
+	; 187 cycles
+	
 ; }
 	
 	
@@ -1415,6 +1563,8 @@ audN_pullLow_noGreyscale:
 	ei					; 4		; 1
 	ret					; 10	; 1
 	
+	; 168 cycles
+	
 	
 ; }
 	
@@ -1449,6 +1599,8 @@ audN_beginGreyscale:
 audN_setupBranch_put:
 	ld (aud_next_branch), a	; 13	; 3
 	
+	; 188/190 cycles
+	
 	; Swap registers
 	push hl				; 11	; 1
 	pop ix				; 14	; 2
@@ -1463,6 +1615,8 @@ audN_setupBranch_put:
 	ld a, intTableB/256	; 7		; 2
 	ld i, a				; 9		; 2
 	
+	; 280/282 cycles
+	
 	; Setup mask pointer
 	ld hl, (greyMask_cur)	; 16	; 3
 	dec l					; 4		; 1
@@ -1470,7 +1624,9 @@ audN_setupBranch_put:
 	ld l, $03				; 7		; 2
 audN_beginGrey_noMaskLoop:
 	ld (greyMask_cur), hl	; 16	; 3
-	ld iy, (greyMask_cur)	; 20
+	ld iy, (greyMask_cur)	; 20	; 4
+	
+	; 348/350/352 cycles
 	
 	; Setup image pointer
 	ld hl, (greyImgBuff)	; 16	; 3
@@ -1481,18 +1637,27 @@ audN_beginGrey_noMaskLoop:
 	ei					; 4		; 1
 	ret					; 10	; 1
 	
-	
-; }
-	
+	; 386/388/390 cycles
 	
 	
 ; }
 	
+	
+	
+; }
+	
+	
+normInt_ram_end:
+.org (normInt_ram_end - normInt_ram) + normInt_rom
 	
 	
 ; }
 
 
+
+ramRoutines_rom:
+ramRoutines_ram		.equ	codeRam
+.org ramRoutines_ram
 
 ; Next Frame {
 
@@ -1530,6 +1695,8 @@ frameEnd_optMenu_Enter:
 	ld a, $01			; 7		; 2
 	ld (inVid), a		; 13	; 3
 	ld (audEn), a		; 13	; 3
+	ld a, (intFreqTimer3)	; 13	; 3
+	out ($36), a		; 11	; 2
 	; Go to seting up first frame
 	jp frameEnd_setupFrame_noLoadPtr	; 10	; 3
 	
@@ -1631,6 +1798,8 @@ frameEnd_enterPressed:
 	ld (audEn), a		; 13	; 3
 	inc a				; 4		; 1
 	ld (isPaused), a	; 13	; 3
+	xor a				; 4		; 1
+	out ($36), a		; 11	; 2
 	
 	jr frameEnd_setupFrame	; 12	; 2
 	
@@ -1642,6 +1811,8 @@ frameEnd_unpause:
 	ld (isPaused), a	; 13	; 3
 	inc a				; 4		; 1
 	ld (audEn), a		; 13	; 3
+	ld a, (intFreqTimer3)	; 13	; 3
+	out ($36), a		; 11	; 2
 	
 frameEnd_nextFrame:
 	; Move to next frame
@@ -1720,9 +1891,13 @@ audReg_sampDone:
 	or a				; 4		; 1
 	jr nz, audReg_audOn	; 7/12	; 2
 	ld de, silence		; 10	; 3
+	;xor a				; 4		; 1
+	;out ($36), a		; 11	; 2
 	jr audReg_audDone	; 12	; 2
 audReg_audOn:
 	ld de, (curAudBuff)	; 20	; 4
+	;ld a, $82			; 7		; 2
+	;out ($36), a		; 11	; 2
 audReg_audDone:
 	
 	exx					; 4		; 1
@@ -1749,12 +1924,29 @@ frameEnd_afterSetup:
 	pop hl				; 10	; 1
 	ret					; 10	; 1
 	
-	
-	
+; }
+
+; Error: Decompression {
 	
 err_decNotFinished:
-	; Unimplimented
-	rst 00h
+	di
+	call disable_clocks
+	; Swap to normal ram page
+	ld a, $81
+	out ($07), a
+	; Display error message
+	ld iy, FLAGS
+	res textWrite, (iy + sGrFlags)
+	ld a, $F0
+	call setLCDDelays
+	ld hl, error_decomp
+	call disp_text
+	ld hl, error_press_on
+	call disp_text
+	; Do nothing until app is exited
+	ei
+err_decNotFinished_loop:
+	jr err_decNotFinished_loop
 	
 	
 ; }
@@ -1780,7 +1972,7 @@ frameList_next:
 	jr nc, frameList_nextPage	; 7/12	; 2
 	
 	; Reset wind-down counter
-	ld a, winddown_default	; 7	; 2
+	ld a, winddown_default	; 7		; 2
 	ld (winddown), a		; 13	; 3
 	
 	ld (frameList_cur), hl	; 16	; 3
@@ -1935,7 +2127,7 @@ dec_wait_loop:
 	
 ; }
 
- 
+
 
 ; Decompress Audio {
 	
@@ -2140,41 +2332,37 @@ dec_alt_done:
 ; Messages are stored here because TI-OS will swap out the normal app page when displaying text
 
 msg_list:
-msg_list_len	.equ	5
+	.db 5
 	.db 12, 0, "INSERT  AUDIO  DEVICE", 0
 	.db 2, 8, "ADJUST  SO  IMAGE  IS  STABLE", 0
 	.db 11, 24, "PRESS  ENTER  TO  START", 0
 	.db 7, 15, "REFR=", 0
 	.db 55, 15, "CONT=", 0
 error_speed:
-	.db 8
-	.db 2, 2
-	.db "Your  calculator's  speed", 0
-	.db "has  been  determined  and", 0
-	.db "it  may  be  too  slow  to", 0
-	.db "run  this  program", 0
-	.db "correctly.", 0
-	.db 0
-	.db "Press  ENTER  to  run", 0
-	.db "anyway", 0
+	.db 7
+	.db 2, 2, "Your  calculators  speed", 0
+	.db 2, 8, "has  been  determined  and", 0
+	.db 2, 14, "it  may  be  too  slow  or", 0
+	.db 2, 20, "too  fast  to  run  this", 0
+	.db 2, 26, "program  correctly.", 0
+	.db 2, 38, "Press  ENTER  to  run", 0
+	.db 2, 44, "anyway", 0
 error_decomp:
-	.db 2
-	.db 2, 2
-	.db "!FATAL ERROR!", 0
-	.db "Frame  Decompression  not", 0
-	.db "finished  by  start  of", 0
-	.db "next  frame",0
+	.db 4
+	.db 2, 2, "!FATAL ERROR!", 0
+	.db 2, 8, "Frame  Decompression  not", 0
+	.db 2, 14, "finished  by  start  of", 0
+	.db 2, 20, "next  frame",0
 error_press_on:
 	.db 1
-	.db 2, 2
-	.db "Press ON to exit", 0
+	.db 2, 54, "Press ON to exit", 0
 	
 
 ; }
 
-normInt_ram_end:
-.org (normInt_ram_end - normInt_ram) + normInt_rom
-.echo $+0
+ramRoutines_ram_end:
+.org (ramRoutines_ram_end - ramRoutines_ram) + ramRoutines_rom
+
 
 
 
@@ -2182,7 +2370,7 @@ normInt_ram_end:
 	
 ; This will be copied to the start of the RAM code area
 testSpeed_rom:
-testSpeed_ram	.equ	$C2C2
+testSpeed_ram	.equ	intPosA
 .org testSpeed_ram
 	
 	
@@ -2222,7 +2410,6 @@ testSpeed_end:
 	
 ; Restore address
 .org testSpeed_rom + (testSpeed_end - testSpeed_intFired)
-.echo $+0
 	
 ; }
 
@@ -2256,12 +2443,7 @@ exitApp:
 	; Restore FLAGS pointer
 	ld iy, FLAGS
 	; Restore automatic LCD delay
-	ld bc, $0429
-	ld hl, autoLCD_A
-autoLCD_load_loop:
-	ld a, (hl) \ inc hl
-	out (c), a \ inc c
-	djnz autoLCD_load_loop
+	call restoreLCDDelays
 	; Restore pages
 	ld a, $80
 	out ($05), a
@@ -2272,12 +2454,14 @@ autoLCD_load_loop:
 	out ($00), a
 	; Return to OS
 	ei
+exitApp_bjump:
 	b_jump(_JForceCmdNoChar)
 
 
 
 save_defaultValues:
 	.db $27, $16
+	;.db $00, $01
 
 def_vid_vars:
 	.db $00		;isPaused
