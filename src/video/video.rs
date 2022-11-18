@@ -98,9 +98,14 @@ impl<'a> Video<'a> {
                                                       Path::new("./").to_path_buf() ]))
             }, Some(path_str) => Path::new(&path_str).to_path_buf(),
         };
-        // Run rabbitsign
+        // Check if local or global rabbitsign executable (def not correct terminology)
         let bin_path = strcat!(self.folder, "out.bin");
-        let output = passerr!(Command::new("rabbitsign").args(["-g", "-v", "-P", "-p", "-k", key_path.to_str().unwrap(), &bin_path, "-o", &strcat!(self.args.out, ".8xk")]).output(), "{}: Could not find rabbitsign program, double-check installation instructions");
+        let exe_path = match std::path::Path::new("rabbitsign/rabbitsign").exists() {
+            true => "rabbitsign/rabbitsign",
+            false => "rabbitsign",
+        };
+        // Run rabbitsign
+        let output = passerr!(Command::new(exe_path).args(["-g", "-v", "-P", "-p", "-k", key_path.to_str().unwrap(), &bin_path, "-o", &strcat!(self.args.out, ".8xk")]).output(), "{}: Could not find rabbitsign program, double-check installation instructions");
         if !output.status.success() {
             io::stdout().write_all(&output.stderr).unwrap();
             io::stdout().write_all(&output.stdout).unwrap();

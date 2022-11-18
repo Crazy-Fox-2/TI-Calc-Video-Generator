@@ -1,9 +1,9 @@
 // General structure for compressing a data stream
 // Can be used with compression schemes which consist of a series of instructions (each an integer
 // number of bytes long) which all compress the data differently
-// This structure is provided various functions for determining properties each instruction will
-// have given a sertain section of data, and it will automaticall run those functions and use those
-// results to determine the most efficiant way of arranging those instructions to produce a
+// This solver is provided various dynamic structs for determining properties each instruction will
+// have given a sertain section of data, and it will automaticall run the supplied functions and use
+// those results to determine the most efficiant way of arranging those instructions to produce a
 // compressed result which is as small as possible
 
 

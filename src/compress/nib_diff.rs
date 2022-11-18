@@ -2,7 +2,10 @@ use crate::compress::instr::{Instr};
 use crate::compress::cycle_limit::{CycleInstr};
 
 
-// 
+// Encodes the difference between samples
+// Switches between nibble-wide differences and byte-wide differences
+// While byte-wide the bottom bit flags if we switch to nibbles
+// While nibble-wide a value of 8 flags that we switch to bytes
 // 
 // Used for the audio compression
 
@@ -20,6 +23,7 @@ pub fn compress(data: &[u8], start: u8) -> (Vec<Box<dyn CycleInstr>>, u8) {
     
     for samp in data.iter() {
         let samp = *samp / 2;
+        // Get difference & check if in nibble or byte range
         let diff: i16 = (samp as i16) - (prev_samp as i16);
         if diff > -8 && diff < 8 && !first {
             if !prev_nib {
