@@ -100,8 +100,8 @@ impl<'a> Video<'a> {
         };
         // Check if local or global rabbitsign executable (def not correct terminology)
         let bin_path = strcat!(self.folder, "out.bin");
-        let exe_path = match std::path::Path::new("rabbitsign/rabbitsign").exists() {
-            true => "rabbitsign/rabbitsign",
+        let exe_path = match std::path::Path::new("rabbitsign/rabbitsign.exe").exists() {
+            true => "rabbitsign/rabbitsign.exe",
             false => "rabbitsign",
         };
         // Run rabbitsign
@@ -119,6 +119,7 @@ impl<'a> Video<'a> {
     fn try_recv(&mut self) -> bool{
         match &self.num_frames {
             NumFrames::Rec(rec) => {
+                // Waiting on thread
                 match rec.try_recv() {
                     Ok(num) => {
                         // Thread has finished and given us the total number of frames
