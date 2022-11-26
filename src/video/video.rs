@@ -100,8 +100,8 @@ impl<'a> Video<'a> {
         };
         // Check if local or global rabbitsign executable (def not correct terminology)
         let bin_path = strcat!(self.folder, "out.bin");
-        let exe_path = match std::path::Path::new("rabbitsign/rabbitsign.exe").exists() {
-            true => "rabbitsign/rabbitsign.exe",
+        let exe_path = match std::path::Path::new("rabbitsign/").exists() {
+            true => "rabbitsign/rabbitsign",
             false => "rabbitsign",
         };
         // Run rabbitsign
