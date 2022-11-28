@@ -83,7 +83,7 @@ Rabbitsign is also provided alongside the Windows download and is licenced under
 
 # Bugs
 
-There's bound to be a few I didn't catch. If you find any, either email me at ?????????? or open an issue on the github page
+There's bound to be a few I didn't catch. If you find any, either email me at crazyfox2a@gmail.com or open an issue on the github page
 
 When reporting a bug please include as many of the following as applicable:
 - A description of the bug
