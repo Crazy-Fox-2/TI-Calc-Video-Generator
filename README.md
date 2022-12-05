@@ -1,7 +1,10 @@
-# Calc-Video-Generator
+# TI-Calc-Video-Generator
 
-A utility for generating videos to play on Ti-83+SE, Ti-84+, and Ti-84+SE calculators.
-Converts given video files into application files to transfer to said calculators ([Demonstration](https://www.youtube.com/watch?v=JiZ8KPonHsw))
+A command-line utility for generating videos to play on Ti-83+SE, Ti-84+, and Ti-84+SE calculators.
+
+Converts a given video file into an application file to transfer to your calcuator.
+Videos will play at 20 frames per second, with 4-level greyscale and 10.24 KHz audio playback from the link port
+([Demonstration](https://www.youtube.com/watch?v=JiZ8KPonHsw))
 
 
 # Download
@@ -13,7 +16,7 @@ For Linux and other distributions follow the build instructions below.
 ffmpeg must still be installed (see below)
 
 
-# Prerequisits
+# Prerequisites
 
 This program uses ffmpeg to extract the audio and video frames.
 
@@ -51,9 +54,9 @@ particular video being encoded and how much it can be compressed. The program wi
 video is taking up.
 
 If your video is too long there are several things you can try. Running with `-s START` and `-d DURRATION` will let you encode only a
-certain section of the video. The start position and durration are measured in calculator frames, (default 20 fps).
+certain section of the video. The start position and durration are measured in calculator frames (default 20 fps).
 
-If the section video is very close to fitting, you can also use `-p FPS` to lower the playback framerate to make it take up less space.
+If the section of video is very close to fitting, you can also use `-p FPS` to lower the playback framerate to make it take up less space.
 This option should stay close to 20 or else the video may start looking/sounding weird.
 
 If the video seems desynced from the audio you can use `-a AUDOFF` to offset the audio playback

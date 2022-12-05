@@ -1,10 +1,8 @@
 /tempvids__/
 /tempvid__/
-/vids/
 /dbg/
 *.png
 *.8xk
-copyapp.sh
 tiVidConvert*
 .gitignore
 /release*/
