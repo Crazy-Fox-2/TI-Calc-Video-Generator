@@ -104,7 +104,6 @@ impl GraphSolve<'_> {
                 }
             }
             // Get new instructions
-            let mut new_instr_count = vec![0; self.numt];
             for itype in 0..self.numt {
                 let insts: Vec<(usize, usize)> = self.gtypes[itype].get_instr_info(self.data, pos-1);
                 'iloop: for (len, id) in insts.iter() {
@@ -114,7 +113,6 @@ impl GraphSolve<'_> {
                             continue 'iloop;
                         }
                     }
-                    new_instr_count[itype] += 1;
                     let mut node = Node::new();
                     node.instr_type = itype;  node.id = *id;   node.len = *len;
                     row.push(node);
