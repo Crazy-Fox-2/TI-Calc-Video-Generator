@@ -62,6 +62,9 @@ This option should stay close to 20 or else the video may start looking/sounding
 If the video seems desynced from the audio you can use `-a AUDOFF` to offset the audio playback
 (greater value means audio begins playing sooner)
 
+If the video being converted has an unusual/verticle aspect ratio then some of the frame may be cut off after being converted.
+By default each frame is cropped to fill the entire screen, to instead shrink the video so the entire frame is visible, run with the `-w` flag.
+
 A list of all command-line arguments can be seen by running `tiVidConvert` with no options
 
 
