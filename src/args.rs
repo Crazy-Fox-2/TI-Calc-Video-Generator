@@ -19,6 +19,7 @@ pub struct VArgs {
     pub dbg_out: bool,
     pub app_source: Option<String>,
     pub key_source: Option<String>,
+    pub show_full: bool,
 }
 
 
@@ -38,6 +39,7 @@ pub fn getargs() -> Result<VArgs, String> {
     args.option("z", "source", "Source application data. Defaults to the provide application data", "SOURCE", Occur::Optional, Some("".to_string()));
     args.option("k", "keyfile", "Keyfile to be passed to Rabbitsign, default is to use the provided 0104.key", "KEYFILE", Occur::Optional, Some("".to_string()));
     
+    args.flag("w", "show_full", "Flag - shrink frame to fit entire video on screen");
     args.flag("m", "mute", "Flag - shuts me up");
     args.flag("g", "debug", "Flag - output debug files during convert");
     args.flag("h", "help", "Flag - Print this help message");
@@ -94,6 +96,7 @@ pub fn getargs() -> Result<VArgs, String> {
                 Ok(s) => Some(s),
                 Err(_) => None,
             }},
+            show_full: args.value_of::<bool>("show_full").unwrap(),
         } ),
         Err(err) => {
             println!("{}", err);

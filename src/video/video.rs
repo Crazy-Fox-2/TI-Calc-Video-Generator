@@ -75,7 +75,7 @@ impl<'a> Video<'a> {
             
             // Load image & audio data
             let fpath = strcat!(self.folder, "frame", src_frame.to_string(), ".png");
-            let img = loadimg::load_interleaved(&fpath, self.args.dither, self.args.dbg_out)?;
+            let img = loadimg::load_interleaved(&fpath, self.args.dither, self.args.dbg_out, self.args.show_full)?;
             let aud = auditer.next().unwrap();
             // Add to app
             app.add_frame(&img, &aud)?;

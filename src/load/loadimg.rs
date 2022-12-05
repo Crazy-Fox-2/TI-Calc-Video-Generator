@@ -9,7 +9,7 @@ use crate::load::dither::dither;
 use image::GenericImageView;
 
 
-pub fn load_imgs(path: &str, keepall: bool, savefile: bool, dither_type: char)
+pub fn load_imgs(path: &str, keepall: bool, savefile: bool, dither_type: char, show_full: bool)
     -> Result<(GrayImage, Option<(RgbaImage, RgbaImage, GrayImage)>), String> {
     
     fn save_if(img: &DynamicImage, path: &str, save: bool) -> Result<(), String> {
@@ -24,16 +24,27 @@ pub fn load_imgs(path: &str, keepall: bool, savefile: bool, dither_type: char)
     // Resize & crop & make greyscale
     let (width, height) = img.dimensions();
     let ratio: f64 = width as f64 / height as f64;
-    let crop = if ratio > 1.5 {
-        // Crop out left & right sides
-        let new_width: u32 = (height * 3) / 2;
-        let x = (width - new_width) / 2;
-        imageops::crop(&mut img, x, 0, new_width, height).to_image()
+    let crop = if !show_full {
+        if ratio > 1.5 {
+            // Crop out left & right sides
+            let new_width: u32 = (height * 3) / 2;
+            let x = (width - new_width) / 2;
+            imageops::crop(&mut img, x, 0, new_width, height).to_image()
+        } else {
+            // Crop out the top & bottom
+            let new_height: u32 = (width * 2) / 3;
+            let y = (height - new_height) / 2;
+            imageops::crop(&mut img, 0, y, width, new_height).to_image()
+        }
     } else {
-        // Crop out the top & bottom
-        let new_height: u32 = (width * 2) / 3;
-        let y = (height - new_height) / 2;
-        imageops::crop(&mut img, 0, y, width, new_height).to_image()
+        // Paste origional image onto black
+        let (new_width, new_height) = if ratio > 1.5 {  (width, (width * 2) / 3)
+                                              } else {  ((height * 3) / 2, height)};
+        let (x, y) = if ratio > 1.5 {   (0, (new_height - height) / 2)
+                             } else {   ((new_width - width) / 2, 0)};
+        let mut back_img = DynamicImage::new_rgb8(new_width, new_height);
+        imageops::overlay(&mut back_img, &img, x as i64, y as i64);
+        back_img.to_rgba8()
     };
     let resize = imageops::resize(&crop, 96, 64, imageops::FilterType::Lanczos3);
     let grey = imageops::colorops::grayscale(&resize);
@@ -55,9 +66,9 @@ pub fn load_imgs(path: &str, keepall: bool, savefile: bool, dither_type: char)
 
 
 
-pub fn load_interleaved(path: &str, dither: char, dbgsave: bool) -> Result<Vec<u8>, String> {
+pub fn load_interleaved(path: &str, dither: char, dbgsave: bool, show_full: bool) -> Result<Vec<u8>, String> {
     // Get dithered image
-    let mut img = load_imgs(path, false, dbgsave, dither)?.0;
+    let mut img = load_imgs(path, false, dbgsave, dither, show_full)?.0;
     // Convert to byte stream
     let mut stream: Vec<u8> = vec![0; 12*64*2];
     let mut iter = img.pixels_mut();
@@ -80,9 +91,9 @@ pub fn load_interleaved(path: &str, dither: char, dbgsave: bool) -> Result<Vec<u
     Ok(stream)
 }
 
-pub fn load_seperate(path: &str, dither: char, dbgsave: bool) -> Result<Vec<u8>, String> {
+pub fn load_seperate(path: &str, dither: char, dbgsave: bool, show_full: bool) -> Result<Vec<u8>, String> {
     // Get dithered image
-    let mut img = load_imgs(path, false, dbgsave, dither)?.0;
+    let mut img = load_imgs(path, false, dbgsave, dither, show_full)?.0;
     // Convert to byte stream
     let mut stream: Vec<u8> = vec![0; 12*64*2];
     let mut iter = img.pixels_mut();

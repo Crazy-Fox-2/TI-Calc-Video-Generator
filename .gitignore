@@ -6,6 +6,8 @@
 *.8xk
 copyapp.sh
 tiVidConvert*
+.gitignore
+/release*/
 
 
 

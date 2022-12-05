@@ -29,6 +29,7 @@ pub struct GraphSolve<'a> {
 
 #[derive(Clone)]
 #[derive(Copy)]
+#[derive(Debug)]
 struct Node {
     cost: isize,
     from: isize,
@@ -85,8 +86,9 @@ impl GraphSolve<'_> {
         for pos in 1..(len+1) {
             
             let mut row: Vec<Node> = Vec::new();
-            
-            // Continue instructions from last frame
+
+            let mut prev_instr_count = vec![0; self.numt];
+            // Continue instructions from last row
             for (ind, node) in graph[pos-1].iter().enumerate() {
                 let ind = ind as isize;
                 if node.len > 1 {
@@ -95,21 +97,26 @@ impl GraphSolve<'_> {
                     node.prev_ind = ind;
                     node.rel_pos += 1;
                     node.cost = -1;
-                    row.push(node);
+                    prev_instr_count[node.instr_type] += 1;
+                    if prev_instr_count[node.instr_type] < 50 {     // *Technically* reduces effectiveness, but it's worth it
+                        row.push(node);
+                    }
                 }
             }
             // Get new instructions
-            for ind in 0..self.numt {
-                let insts: Vec<(usize, usize)> = self.gtypes[ind].get_instr_info(self.data, pos-1);
+            let mut new_instr_count = vec![0; self.numt];
+            for itype in 0..self.numt {
+                let insts: Vec<(usize, usize)> = self.gtypes[itype].get_instr_info(self.data, pos-1);
                 'iloop: for (len, id) in insts.iter() {
                     // Add if given id does not match one we're already doing
                     for node in graph[pos-1].iter() {
-                        if node.id == *id && node.instr_type == ind {
+                        if node.id == *id && node.instr_type == itype {
                             continue 'iloop;
                         }
                     }
+                    new_instr_count[itype] += 1;
                     let mut node = Node::new();
-                    node.instr_type = ind;  node.id = *id;   node.len = *len;
+                    node.instr_type = itype;  node.id = *id;   node.len = *len;
                     row.push(node);
                 }
             }

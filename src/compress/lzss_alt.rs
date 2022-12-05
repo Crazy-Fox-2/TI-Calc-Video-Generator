@@ -113,6 +113,10 @@ impl GraphFuncs for LZSSGraphFuncs {
             if len >= 2 {
                 let offset = pos - from_start;  // offset will be the unique identifier
                 list.push((len, offset));
+                // Make sure not to overload the graph with LZSS instructions
+                if list.len() >= 8 {
+                    break;
+                }
             }
         }
         list
