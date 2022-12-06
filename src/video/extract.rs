@@ -83,7 +83,7 @@ pub fn extract_video(args: &VArgs, folder_path: &str, vid_path: &str) -> Result<
             // Figure out framerate from output
             let s = match std::str::from_utf8(&out.stdout) {
                 Ok(v) => v,
-                Err(e) => return Err(format!("Invalid UTF=8 sequence when extracting framerate: {}", e))
+                Err(e) => return Err(format!("Invalid UTF-8 sequence when extracting framerate: {}", e))
             };
             //println!("{}", s);
             let mut split = s.split(&['/', '\n', '\r']);
