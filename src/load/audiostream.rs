@@ -24,7 +24,7 @@ impl Iterator for AudIter {
             self.bytes.next();      // Ignore least-significant byte
             let mut signed_samp = match self.bytes.next() {
                 Some(s) => s.unwrap() as i8 as i16,
-                None => return None,
+                None => return Some(vec![((self.range_low + self.range_high) / 2) as u8; 512]),
             };
             //println!("{}", signed_samp);
             signed_samp *= 2;
