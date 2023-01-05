@@ -4,7 +4,7 @@ A command-line utility for generating videos to play on Ti-83+SE, Ti-84+, and Ti
 
 Converts a given video file into an application file to transfer to your calcuator.
 Videos will play at 20 frames per second, with 4-level greyscale and 10.24 KHz audio playback from the link port
-([Demonstration](https://www.youtube.com/watch?v=JiZ8KPonHsw))
+([Demonstration](https://www.youtube.com/watch?v=AUHVUsz7_0o))
 
 
 # Download
