@@ -110,7 +110,6 @@ impl<'a> Video<'a> {
             Ok(path) => path,
             Err(_) => Path::new(RABBIT_EXE).to_path_buf(),
         };
-        println!("{:?}", exe_path);
         // Run rabbitsign
         let output = passerr!(Command::new(exe_path).args(["-g", "-v", "-P", "-p", "-k", key_path.to_str().unwrap(), &bin_path, "-o", &strcat!(self.args.out, ".8xk")]).output(), "{}: Could not find rabbitsign program, double-check installation instructions");
         if !output.status.success() {
