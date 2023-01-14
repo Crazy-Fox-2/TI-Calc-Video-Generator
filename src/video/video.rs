@@ -10,6 +10,11 @@ use std::io::{self, Write};
 use std::path::Path;
 
 
+#[cfg(target_os = "windows")]
+const RABBIT_EXE: &str = "rabbitsign.exe";
+#[cfg(not(target_os = "windows"))]
+const RABBIT_EXE: &str = "rabbitsign";
+
 
 pub enum NumFrames {
     Rec(Receiver<usize>),
@@ -98,12 +103,14 @@ impl<'a> Video<'a> {
                                                       Path::new("./").to_path_buf() ]))
             }, Some(path_str) => Path::new(&path_str).to_path_buf(),
         };
-        // Check if local or global rabbitsign executable (def not correct terminology)
         let bin_path = strcat!(self.folder, "out.bin");
-        let exe_path = match std::path::Path::new("rabbitsign/").exists() {
-            true => "rabbitsign/rabbitsign",
-            false => "rabbitsign",
+        // Get rabbitsign location
+        let exe_path = match find_file_exe(RABBIT_EXE, &[ Path::new("rabbitsign").to_path_buf(),
+                                                            Path::new("./").to_path_buf()]) {
+            Ok(path) => path,
+            Err(_) => Path::new(RABBIT_EXE).to_path_buf(),
         };
+        println!("{:?}", exe_path);
         // Run rabbitsign
         let output = passerr!(Command::new(exe_path).args(["-g", "-v", "-P", "-p", "-k", key_path.to_str().unwrap(), &bin_path, "-o", &strcat!(self.args.out, ".8xk")]).output(), "{}: Could not find rabbitsign program, double-check installation instructions");
         if !output.status.success() {
